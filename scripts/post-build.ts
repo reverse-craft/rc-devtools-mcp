@@ -84,7 +84,7 @@ function copyDevToolsDescriptionFiles() {
   const destDir = path.join(
     BUILD_DIR,
     'src',
-    'third_party',
+    'third-party',
     'issue-descriptions',
   );
   fs.cpSync(sourceDir, destDir, {recursive: true});
