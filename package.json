@@ -7,7 +7,7 @@
   "main": "index.js",
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
-    "bundle": "npm run clean && npm run build && NODE_ENV=production rollup -c rollup.config.mjs && npm run minify && node -e \"require('fs').rmSync('build/node_modules', {recursive: true, force: true})\" && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/copy-dependencies.ts",
+    "bundle": "npm run clean && npm run build && NODE_ENV=production rollup -c rollup.config.mjs && npm run minify",
     "build": "tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
     "minify": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/minify.ts",
     "typecheck": "tsc --noEmit",
