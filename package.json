@@ -1,5 +1,5 @@
 {
-  "name": "rc-devtools-mcp",
+  "name": "@reverse-craft/rc-devtools-mcp",
   "version": "0.1.1",
   "description": "ReverseCraft DevTools MCP - MCP server for browser debugging and reverse engineering",
   "type": "module",

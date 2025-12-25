@@ -15,13 +15,13 @@ A powerful MCP (Model Context Protocol) server for browser debugging and reverse
 ### Using npx (Recommended)
 
 ```bash
-npx rc-devtools-mcp@latest
+npx @reverse-craft/rc-devtools-mcp@latest
 ```
 
 ### Using npm
 
 ```bash
-npm install -g rc-devtools-mcp
+npm install -g @reverse-craft/rc-devtools-mcp
 rc-devtools-mcp
 ```
 
@@ -36,7 +36,7 @@ Add to your Kiro MCP configuration (`.kiro/settings/mcp.json`):
   "mcpServers": {
     "rc-devtools": {
       "command": "npx",
-      "args": ["rc-devtools-mcp@latest"]
+      "args": ["@reverse-craft/rc-devtools-mcp@latest"]
     }
   }
 }
@@ -51,7 +51,7 @@ Add to your Cursor MCP configuration:
   "mcpServers": {
     "rc-devtools": {
       "command": "npx",
-      "args": ["rc-devtools-mcp@latest"]
+      "args": ["@reverse-craft/rc-devtools-mcp@latest"]
     }
   }
 }
@@ -66,7 +66,7 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
   "mcpServers": {
     "rc-devtools": {
       "command": "npx",
-      "args": ["rc-devtools-mcp@latest"]
+      "args": ["@reverse-craft/rc-devtools-mcp@latest"]
     }
   }
 }
@@ -80,7 +80,7 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
     "rc-devtools": {
       "command": "npx",
       "args": [
-        "rc-devtools-mcp@latest",
+        "@reverse-craft/rc-devtools-mcp@latest",
         "--headless",
         "--viewport", "1920x1080"
       ]
@@ -215,27 +215,27 @@ List all network requests and show me the API calls
 
 Connect to an existing Chrome instance:
 ```bash
-npx rc-devtools-mcp@latest --browser-url http://127.0.0.1:9222
+npx @reverse-craft/rc-devtools-mcp@latest --browser-url http://127.0.0.1:9222
 ```
 
 Run in headless mode:
 ```bash
-npx rc-devtools-mcp@latest --headless
+npx @reverse-craft/rc-devtools-mcp@latest --headless
 ```
 
 Use Chrome Canary:
 ```bash
-npx rc-devtools-mcp@latest --channel canary
+npx @reverse-craft/rc-devtools-mcp@latest --channel canary
 ```
 
 Set viewport size:
 ```bash
-npx rc-devtools-mcp@latest --viewport 1920x1080
+npx @reverse-craft/rc-devtools-mcp@latest --viewport 1920x1080
 ```
 
 Use with proxy:
 ```bash
-npx rc-devtools-mcp@latest --proxy-server http://proxy.example.com:8080
+npx @reverse-craft/rc-devtools-mcp@latest --proxy-server http://proxy.example.com:8080
 ```
 
 ## Requirements
