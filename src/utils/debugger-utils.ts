@@ -9,7 +9,7 @@ import type {CDPSession, Page} from '../third-party/index.js';
 import {clearParseResultCache} from '../tools/analysis.js';
 
 import {getCdpSession} from './cdp.js';
-import {cacheScript, clearScriptCache} from './smart-breakpoint-utils';
+import {cacheScript, clearScriptCache} from './smart-breakpoint-utils.js';
 
 // Store active breakpoints per page
 export interface BreakpointInfo {
