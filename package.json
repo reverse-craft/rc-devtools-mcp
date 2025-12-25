@@ -1,0 +1,78 @@
+{
+  "name": "rc-devtools-mcp",
+  "version": "0.1.0",
+  "description": "ReverseCraft DevTools MCP - MCP server for browser debugging and reverse engineering",
+  "type": "module",
+  "bin": "./build/src/index.js",
+  "main": "index.js",
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('build', {recursive: true, force: true})\"",
+    "bundle": "npm run clean && npm run build && NODE_ENV=production rollup -c rollup.config.mjs && npm run minify && node -e \"require('fs').rmSync('build/node_modules', {recursive: true, force: true})\" && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/copy-dependencies.ts",
+    "build": "tsc && node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/post-build.ts",
+    "minify": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/minify.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "eslint --cache --fix . && prettier --write --cache .",
+    "check-format": "eslint --cache . && prettier --check --cache .;",
+    "start": "npm run build && node build/src/index.js",
+    "start-debug": "DEBUG=mcp:* DEBUG_COLORS=false npm run build && node build/src/index.js",
+    "test:no-build": "node --import ./build/tests/setup.js --no-warnings=ExperimentalWarning --experimental-print-required-tla --test-reporter spec --test-force-exit --test \"build/tests/**/*.test.js\"",
+    "test": "npm run build && npm run test:no-build",
+    "test:only": "npm run build && npm run test:only:no-build",
+    "test:only:no-build": "node --import ./build/tests/setup.js --no-warnings=ExperimentalWarning --test-reporter spec --test-force-exit --test --test-only \"build/tests/**/*.test.js\""
+  },
+  "files": [
+    "build/src",
+    "build/node_modules",
+    "LICENSE",
+    "!*.tsbuildinfo"
+  ],
+  "repository": "reverse-craft/rc-devtools-mcp",
+  "author": "ReverseCraft",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "core-js": "3.47.0"
+  },
+  "bugs": {
+    "url": "https://github.com/reverse-craft/rc-devtools-mcp/issues"
+  },
+  "homepage": "https://github.com/reverse-craft/rc-devtools-mcp#readme",
+  "mcpName": "io.github.reverse-craft/rc-devtools-mcp",
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@modelcontextprotocol/sdk": "1.24.3",
+    "@rollup/plugin-commonjs": "^29.0.0",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@stylistic/eslint-plugin": "^5.4.0",
+    "@types/acorn": "^4.0.6",
+    "@types/debug": "^4.1.12",
+    "@types/filesystem": "^0.0.36",
+    "@types/node": "^25.0.0",
+    "@types/sinon": "^21.0.0",
+    "@types/yargs": "^17.0.33",
+    "@typescript-eslint/eslint-plugin": "^8.43.0",
+    "@typescript-eslint/parser": "^8.43.0",
+    "chrome-devtools-frontend": "1.0.1555430",
+    "debug": "4.4.3",
+    "eslint": "^9.35.0",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "fast-check": "^4.4.0",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "puppeteer": "24.33.0",
+    "rollup": "4.53.3",
+    "rollup-plugin-cleanup": "^3.2.1",
+    "rollup-plugin-license": "^3.6.0",
+    "sinon": "^21.0.0",
+    "terser": "^5.44.1",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.43.0",
+    "yargs": "18.0.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=23"
+  }
+}

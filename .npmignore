@@ -1,0 +1,36 @@
+# Source files
+src/
+tests/
+scripts/
+
+# Config files
+tsconfig.json
+.eslintrc*
+.prettierrc*
+eslint.config.*
+rollup.config.*
+
+# Development files
+.gitignore
+.github/
+.vscode/
+.kiro/
+
+# Documentation source
+docs/
+
+# Test files
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Build artifacts not needed for npm
+*.tsbuildinfo
+.eslintcache
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
