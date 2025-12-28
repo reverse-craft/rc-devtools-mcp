@@ -30,6 +30,7 @@ import {
   extractState,
   formatState,
 } from '../utils/ir-state-extractor.js';
+import {findMatchingScripts} from '../utils/smart-breakpoint-utils.js';
 
 import {ToolCategory} from './categories.js';
 import {defineTool} from './tool-definition.js';
@@ -57,8 +58,20 @@ export const createIrDebugger = defineTool({
       .optional()
       .describe('Path to the ASM file. If not provided, derived from sourceMapPath by removing .map extension.'),
   },
-  handler: async (request, response, _context) => {
+  handler: async (request, response, context) => {
     const {sourceMapPath, urlPattern, asmPath} = request.params;
+
+    // First, verify that the urlPattern matches at least one script in the browser
+    const page = context.getSelectedPage();
+    const cdpSession = await initializeDebuggerForPage(page, {forceEnable: true});
+    const matchingScripts = await findMatchingScripts(cdpSession, urlPattern);
+
+    if (matchingScripts.length === 0) {
+      response.appendResponseLine(`❌ Failed to create IR debugger session`);
+      response.appendResponseLine(`   Error: No scripts found matching URL pattern "${urlPattern}"`);
+      response.appendResponseLine(`   Make sure the target page is loaded and the URL pattern is correct.`);
+      return;
+    }
 
     const result = createSession({
       sourceMapPath,
@@ -85,6 +98,13 @@ export const createIrDebugger = defineTool({
 
     response.appendResponseLine(`✅ Session created: ${sessionId}`);
     response.appendResponseLine(`   Source: ${sourceMap.sourceFile} (${sourceMap.mappings.length} mappings)`);
+    response.appendResponseLine(`   Matched scripts: ${matchingScripts.length}`);
+    for (const script of matchingScripts.slice(0, 3)) {
+      response.appendResponseLine(`     - ${script.url}`);
+    }
+    if (matchingScripts.length > 3) {
+      response.appendResponseLine(`     ... and ${matchingScripts.length - 3} more`);
+    }
   },
 });
 
