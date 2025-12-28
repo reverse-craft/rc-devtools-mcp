@@ -76,11 +76,15 @@ export const loadIrSourceMap = defineTool({
       return;
     }
 
-    const {irId, session} = result;
+    const {irId, session, isReload} = result;
     const sourceMap = session.sourceMap;
     const urlPattern = session.config.urlPattern;
 
-    response.appendResponseLine(`✅ IR source map loaded: ${irId}`);
+    if (isReload) {
+      response.appendResponseLine(`✅ IR source map reloaded: ${irId}`);
+    } else {
+      response.appendResponseLine(`✅ IR source map loaded: ${irId}`);
+    }
     response.appendResponseLine(`   Source: ${sourceMap.sourceFile} (${sourceMap.mappings.length} mappings)`);
     response.appendResponseLine(`   URL pattern: ${urlPattern}`);
     response.appendResponseLine(`   Breakpoints will be resolved when the matching script loads.`);

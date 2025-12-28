@@ -31,7 +31,7 @@ import {
  * Result type for source map loading operations.
  */
 export type LoadSourceMapResult =
-  | { success: true; irId: string; session: IRSession }
+  | { success: true; irId: string; session: IRSession; isReload: boolean }
   | { success: false; error: IRDebuggerError };
 
 /**
@@ -195,11 +195,30 @@ export interface LoadSourceMapInput {
 }
 
 /**
+ * Finds an existing session by source map path.
+ * @param sourceMapPath Path to the source map file
+ * @returns The existing session or undefined
+ */
+function findSessionBySourceMapPath(sourceMapPath: string): IRSession | undefined {
+  for (const session of irSessions.values()) {
+    if (session.config.sourceMapPath === sourceMapPath) {
+      return session;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Loads an IR source map for debugging.
+ * If the same sourceMapPath was already loaded, it will be reloaded (updated)
+ * while preserving the existing irId.
  * @param input Source map loading input (only sourceMapPath is required)
  * @returns LoadSourceMapResult with either the session or an error
  */
 export function loadSourceMap(input: LoadSourceMapInput): LoadSourceMapResult {
+  // Check if this source map is already loaded
+  const existingSession = findSessionBySourceMapPath(input.sourceMapPath);
+
   // Parse the source map
   const parseResult = parseSourceMap(input.sourceMapPath);
   if (parseResult.success === false) {
@@ -221,8 +240,14 @@ export function loadSourceMap(input: LoadSourceMapInput): LoadSourceMapResult {
     asmPath,
   };
 
-  // Generate unique IR ID
-  const irId = generateIrId();
+  // Reuse existing irId if reloading, otherwise generate new one
+  const irId = existingSession ? existingSession.irId : generateIrId();
+  const isReload = !!existingSession;
+
+  // If reloading, remove the old session first
+  if (existingSession) {
+    irSessions.delete(existingSession.irId);
+  }
 
   // Create session instance
   const session = new IRSession(irId, sessionConfig, sourceMap);
@@ -230,7 +255,7 @@ export function loadSourceMap(input: LoadSourceMapInput): LoadSourceMapResult {
   // Store session
   irSessions.set(irId, session);
 
-  return { success: true, irId, session };
+  return { success: true, irId, session, isReload };
 }
 
 /**
