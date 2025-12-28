@@ -250,6 +250,7 @@ List all network requests and show me the API calls
 - `maxOutputLines` (number, optional): Maximum output lines (default: 100)
 - `maxCallStackFrames` (number, optional): Max call stack frames (default: 20)
 - `maxLineLength` (number, optional): Max characters per line (default: 500)
+- `showIRContext` (boolean, optional): Show IR context if paused in JSVMP code (default: true)
 
 **`evaluate_on_call_frame`** - Evaluate JavaScript expression in a specific call frame
 - `expression` (string, required): JavaScript expression to evaluate
@@ -281,30 +282,32 @@ List all network requests and show me the API calls
 
 Tools for debugging JSVMP-protected JavaScript at the IR (Intermediate Representation) level. Requires a source map file that maps IR code to original JS locations.
 
-**`create_ir_debugger`** - Create a new IR debugging session
+The `get_debugger_status` tool automatically detects IR context when paused in JSVMP code and displays IR line, opcode, semantic description, and VM register values. The `list_breakpoints` tool also identifies IR breakpoints and shows their IR metadata.
+
+**`load_ir_source_map`** - Load an IR source map file for JSVMP debugging
 - `sourceMapPath` (string, required): Path to the source map JSON file
-- `urlPattern` (string, required): Regex pattern to match the original JS file in browser
-- `asmPath` (string, optional): Path to ASM file (defaults to sourceMapPath without .map extension)
+- Returns a unique `irId` for subsequent operations
 
-**`list_ir_debuggers`** - List all active IR debugging sessions
+**`list_ir_source_maps`** - List all loaded IR source maps
 - No parameters
+- Shows `irId`, source map path, URL pattern, and breakpoint count for each
 
-**`remove_ir_debugger`** - Remove an IR debugging session and clear its breakpoints
-- `sessionId` (string, required): Session ID to remove
+**`unload_ir_source_map`** - Unload an IR source map and clear all associated breakpoints
+- `irId` (string, required): The IR ID returned by `load_ir_source_map`
 
 **`ir_set_breakpoint`** - Set a breakpoint at a specific IR line
-- `sessionId` (string, required): IR debugger session ID
+- `irId` (string, required): The IR ID from `load_ir_source_map`
 - `irLine` (number, required): IR line number to set breakpoint at
 
 **`ir_remove_breakpoint`** - Remove a breakpoint at a specific IR line
-- `sessionId` (string, required): IR debugger session ID
+- `irId` (string, required): The IR ID from `load_ir_source_map`
 - `irLine` (number, required): IR line number of breakpoint to remove
 
-**`ir_clear_breakpoints`** - Clear all breakpoints in an IR session
-- `sessionId` (string, required): IR debugger session ID
+**`ir_clear_breakpoints`** - Clear all breakpoints for a specific IR source map
+- `irId` (string, required): The IR ID from `load_ir_source_map`
 
-**`ir_get_state`** - Get current IR state when paused at a breakpoint
-- `sessionId` (string, required): IR debugger session ID
+**`ir_get_state`** - Get detailed IR state when paused at a breakpoint
+- `irId` (string, optional): The IR ID (auto-detects if not provided)
 - `frameIndex` (number, optional): Call frame index (default: 0)
 - `maxValueLength` (number, optional): Max length for displayed values (default: 300)
 - `contextLines` (number, optional): IR code lines to show around current line (default: 5)

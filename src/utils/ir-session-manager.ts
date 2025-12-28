@@ -5,13 +5,12 @@
  */
 
 /**
- * IR Session Manager
- * Manages IR debugging sessions, including creation, retrieval, listing, and removal.
+ * IR Source Map Manager
+ * Manages IR source maps for debugging, including loading, retrieval, listing, and unloading.
  */
 
 import type {
   IRSessionConfig,
-  IRSessionInfo,
   ParsedSourceMap,
   IRBreakpointInfo,
   VMRegisters,
@@ -29,37 +28,53 @@ import {
 } from './ir-source-map-parser.js';
 
 /**
- * Result type for session creation operations.
+ * Result type for source map loading operations.
  */
-export type CreateSessionResult =
-  | { success: true; sessionId: string; session: IRSession }
+export type LoadSourceMapResult =
+  | { success: true; irId: string; session: IRSession }
   | { success: false; error: IRDebuggerError };
 
 /**
- * Result type for session retrieval operations.
+ * Result type for source map retrieval operations.
  */
-export type GetSessionResult =
+export type GetSourceMapResult =
   | { success: true; session: IRSession }
   | { success: false; error: IRDebuggerError };
 
 /**
- * Result type for session removal operations.
+ * Result type for source map unloading operations.
  */
-export type RemoveSessionResult =
+export type UnloadSourceMapResult =
   | { success: true; removedBreakpointIds: string[] }
   | { success: false; error: IRDebuggerError };
+
+/**
+ * Information about a loaded IR source map.
+ */
+export interface IRSourceMapInfo {
+  /** Unique IR identifier */
+  irId: string;
+  /** Path to the source map file */
+  sourceMapPath: string;
+  /** URL pattern for the original JS file */
+  urlPattern: string;
+  /** Path to the ASM file */
+  asmPath: string;
+  /** Number of active breakpoints */
+  breakpointCount: number;
+}
 
 /**
  * Represents a single IR debugging session.
  */
 export class IRSession {
-  readonly sessionId: string;
+  readonly irId: string;
   readonly config: IRSessionConfig;
   readonly sourceMap: ParsedSourceMap;
   readonly breakpoints: Map<string, IRBreakpointInfo>;
 
-  constructor(sessionId: string, config: IRSessionConfig, sourceMap: ParsedSourceMap) {
-    this.sessionId = sessionId;
+  constructor(irId: string, config: IRSessionConfig, sourceMap: ParsedSourceMap) {
+    this.irId = irId;
     this.config = config;
     this.sourceMap = sourceMap;
     this.breakpoints = new Map();
@@ -143,10 +158,16 @@ export class IRSession {
 }
 
 /**
- * Generates a unique session ID.
+ * Counter for generating incremental IR IDs.
  */
-function generateSessionId(): string {
-  return `ir_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+let irIdCounter = 0;
+
+/**
+ * Generates a unique IR ID using an incrementing counter.
+ */
+function generateIrId(): string {
+  irIdCounter++;
+  return String(irIdCounter);
 }
 
 /**
@@ -166,19 +187,19 @@ export function deriveAsmPath(sourceMapPath: string): string {
 const irSessions = new Map<string, IRSession>();
 
 /**
- * Input for creating an IR debugging session.
+ * Input for loading an IR source map.
  */
-export interface CreateSessionInput {
+export interface LoadSourceMapInput {
   /** Path to the source map JSON file */
   sourceMapPath: string;
 }
 
 /**
- * Creates a new IR debugging session.
- * @param input Session creation input (only sourceMapPath is required)
- * @returns CreateSessionResult with either the session or an error
+ * Loads an IR source map for debugging.
+ * @param input Source map loading input (only sourceMapPath is required)
+ * @returns LoadSourceMapResult with either the session or an error
  */
-export function createSession(input: CreateSessionInput): CreateSessionResult {
+export function loadSourceMap(input: LoadSourceMapInput): LoadSourceMapResult {
   // Parse the source map
   const parseResult = parseSourceMap(input.sourceMapPath);
   if (parseResult.success === false) {
@@ -200,32 +221,32 @@ export function createSession(input: CreateSessionInput): CreateSessionResult {
     asmPath,
   };
 
-  // Generate unique session ID
-  const sessionId = generateSessionId();
+  // Generate unique IR ID
+  const irId = generateIrId();
 
   // Create session instance
-  const session = new IRSession(sessionId, sessionConfig, sourceMap);
+  const session = new IRSession(irId, sessionConfig, sourceMap);
 
   // Store session
-  irSessions.set(sessionId, session);
+  irSessions.set(irId, session);
 
-  return { success: true, sessionId, session };
+  return { success: true, irId, session };
 }
 
 /**
- * Gets an IR session by ID.
- * @param sessionId Session ID
- * @returns GetSessionResult with either the session or an error
+ * Gets an IR source map by ID.
+ * @param irId IR ID
+ * @returns GetSourceMapResult with either the session or an error
  */
-export function getSession(sessionId: string): GetSessionResult {
-  const session = irSessions.get(sessionId);
+export function getSourceMap(irId: string): GetSourceMapResult {
+  const session = irSessions.get(irId);
   if (!session) {
     return {
       success: false,
       error: {
         code: ErrorCodes.SESSION_NOT_FOUND,
-        message: `IR session not found: ${sessionId}`,
-        details: { sessionId },
+        message: `IR source map not found: ${irId}`,
+        details: { irId },
       },
     };
   }
@@ -233,37 +254,37 @@ export function getSession(sessionId: string): GetSessionResult {
 }
 
 /**
- * Lists all active IR sessions.
- * @returns Array of session information
+ * Lists all loaded IR source maps.
+ * @returns Array of source map information
  */
-export function listSessions(): IRSessionInfo[] {
-  const sessions: IRSessionInfo[] = [];
+export function listSourceMaps(): IRSourceMapInfo[] {
+  const sourceMaps: IRSourceMapInfo[] = [];
   irSessions.forEach((session) => {
-    sessions.push({
-      sessionId: session.sessionId,
+    sourceMaps.push({
+      irId: session.irId,
       sourceMapPath: session.config.sourceMapPath,
       urlPattern: session.config.urlPattern,
       asmPath: session.config.asmPath!,
       breakpointCount: session.getBreakpointCount(),
     });
   });
-  return sessions;
+  return sourceMaps;
 }
 
 /**
- * Removes an IR session.
- * @param sessionId Session ID to remove
- * @returns RemoveSessionResult with either success info or an error
+ * Unloads an IR source map.
+ * @param irId IR ID to unload
+ * @returns UnloadSourceMapResult with either success info or an error
  */
-export function removeSession(sessionId: string): RemoveSessionResult {
-  const session = irSessions.get(sessionId);
+export function unloadSourceMap(irId: string): UnloadSourceMapResult {
+  const session = irSessions.get(irId);
   if (!session) {
     return {
       success: false,
       error: {
         code: ErrorCodes.SESSION_NOT_FOUND,
-        message: `IR session not found: ${sessionId}`,
-        details: { sessionId },
+        message: `IR source map not found: ${irId}`,
+        details: { irId },
       },
     };
   }
@@ -272,21 +293,54 @@ export function removeSession(sessionId: string): RemoveSessionResult {
   const removedBreakpointIds = session.clearBreakpoints();
 
   // Remove session from storage
-  irSessions.delete(sessionId);
+  irSessions.delete(irId);
 
   return { success: true, removedBreakpointIds };
 }
 
 /**
- * Clears all sessions (useful for testing).
+ * Clears all source maps (useful for testing).
+ * Also resets the IR ID counter.
  */
-export function clearAllSessions(): void {
+export function clearAllSourceMaps(): void {
   irSessions.clear();
+  irIdCounter = 0;
 }
 
 /**
- * Gets the count of active sessions (useful for testing).
+ * Gets the count of loaded source maps (useful for testing).
  */
-export function getSessionCount(): number {
+export function getSourceMapCount(): number {
   return irSessions.size;
+}
+
+/**
+ * Finds a source map by matching a URL against source map URL patterns.
+ * @param url The URL to match (e.g., from a paused call frame)
+ * @returns GetSourceMapResult with either the matching session or an error
+ */
+export function findSourceMapByUrl(url: string): GetSourceMapResult {
+  for (const session of irSessions.values()) {
+    const pattern = session.config.urlPattern;
+    try {
+      const regex = new RegExp(pattern);
+      if (regex.test(url)) {
+        return { success: true, session };
+      }
+    } catch {
+      // If pattern is not a valid regex, try exact match
+      if (url.includes(pattern)) {
+        return { success: true, session };
+      }
+    }
+  }
+
+  return {
+    success: false,
+    error: {
+      code: ErrorCodes.SESSION_NOT_FOUND,
+      message: `No IR source map found matching URL: ${url}`,
+      details: { url },
+    },
+  };
 }

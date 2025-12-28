@@ -456,3 +456,75 @@ export function clearTrackedXhrBreakpoints(page: Page): void {
     patterns.clear();
   }
 }
+
+// ============================================================================
+// IR Breakpoint Metadata Storage
+// ============================================================================
+
+/**
+ * IR breakpoint metadata, stored alongside CDP breakpoint ID.
+ * This allows list_breakpoints to identify which breakpoints are IR breakpoints
+ * and display additional IR-specific information.
+ */
+export interface IRBreakpointMetadata {
+  /** The IR source map ID */
+  irId: string;
+  /** The IR line number where the breakpoint was set */
+  irLine: number;
+  /** The IR address (PC value) corresponding to this line */
+  irAddr: number;
+  /** The opcode name at this IR line */
+  opcodeName: string;
+}
+
+// Storage structure: Map<cdpBreakpointId, IRBreakpointMetadata>
+const irBreakpointMetadata = new Map<string, IRBreakpointMetadata>();
+
+/**
+ * Store IR breakpoint metadata for a CDP breakpoint.
+ * 
+ * @param cdpBreakpointId - The CDP breakpoint ID returned by Debugger.setBreakpointByUrl
+ * @param metadata - The IR-specific metadata to associate with this breakpoint
+ */
+export function setIRBreakpointMetadata(cdpBreakpointId: string, metadata: IRBreakpointMetadata): void {
+  irBreakpointMetadata.set(cdpBreakpointId, metadata);
+}
+
+/**
+ * Get IR breakpoint metadata for a CDP breakpoint.
+ * 
+ * @param cdpBreakpointId - The CDP breakpoint ID to look up
+ * @returns The IR metadata if this is an IR breakpoint, undefined otherwise
+ */
+export function getIRBreakpointMetadata(cdpBreakpointId: string): IRBreakpointMetadata | undefined {
+  return irBreakpointMetadata.get(cdpBreakpointId);
+}
+
+/**
+ * Remove IR breakpoint metadata for a CDP breakpoint.
+ * 
+ * @param cdpBreakpointId - The CDP breakpoint ID to remove metadata for
+ */
+export function removeIRBreakpointMetadata(cdpBreakpointId: string): void {
+  irBreakpointMetadata.delete(cdpBreakpointId);
+}
+
+/**
+ * Clear all IR breakpoint metadata associated with a specific IR source map.
+ * This is called when unloading an IR source map to clean up all related metadata.
+ * 
+ * @param irId - The IR source map ID to clear metadata for
+ * @returns Array of CDP breakpoint IDs that had their metadata cleared
+ */
+export function clearIRBreakpointMetadataByIrId(irId: string): string[] {
+  const clearedIds: string[] = [];
+  
+  for (const [cdpBreakpointId, metadata] of irBreakpointMetadata.entries()) {
+    if (metadata.irId === irId) {
+      irBreakpointMetadata.delete(cdpBreakpointId);
+      clearedIds.push(cdpBreakpointId);
+    }
+  }
+  
+  return clearedIds;
+}

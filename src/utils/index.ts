@@ -185,16 +185,19 @@ export {
 // IR Session Manager
 export {
   IRSession,
-  createSession,
-  getSession,
-  listSessions,
-  removeSession,
-  clearAllSessions,
-  getSessionCount,
+  loadSourceMap,
+  getSourceMap,
+  listSourceMaps,
+  unloadSourceMap,
+  clearAllSourceMaps,
+  getSourceMapCount,
+  findSourceMapByUrl,
   deriveAsmPath,
-  type CreateSessionResult,
-  type GetSessionResult,
-  type RemoveSessionResult,
+  type LoadSourceMapResult,
+  type GetSourceMapResult,
+  type UnloadSourceMapResult,
+  type IRSourceMapInfo,
+  type LoadSourceMapInput,
 } from './ir-session-manager.js';
 
 // IR Source Map Parser

@@ -46,10 +46,11 @@ export interface IRSessionConfig {
 
 /**
  * Information about an IR debugging session.
+ * @deprecated Use IRSourceMapInfo from ir-session-manager.ts instead
  */
 export interface IRSessionInfo {
-  /** Unique session identifier */
-  sessionId: string;
+  /** Unique IR identifier */
+  irId: string;
   /** Path to the source map file */
   sourceMapPath: string;
   /** URL pattern for the original JS file */
