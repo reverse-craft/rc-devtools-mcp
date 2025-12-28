@@ -30,7 +30,6 @@ import {
   extractState,
   formatState,
 } from '../utils/ir-state-extractor.js';
-import {findMatchingScripts} from '../utils/smart-breakpoint-utils.js';
 
 import {ToolCategory} from './categories.js';
 import {defineTool} from './tool-definition.js';
@@ -38,6 +37,8 @@ import {defineTool} from './tool-definition.js';
 /**
  * Create a new IR debugging session.
  * Parses the source map and builds indexes for efficient lookups.
+ * Note: Does not require the target script to be loaded - breakpoints can be set
+ * before the script loads and will be resolved when the script is parsed.
  */
 export const createIrDebugger = defineTool({
   name: 'create_ir_debugger',
@@ -51,10 +52,10 @@ export const createIrDebugger = defineTool({
       .string()
       .describe('Path to the source map JSON file that maps IR code to original JS.'),
   },
-  handler: async (request, response, context) => {
+  handler: async (request, response, _context) => {
     const {sourceMapPath} = request.params;
 
-    // First, create the session to parse the source map and get the URL pattern
+    // Create the session by parsing the source map
     const result = createSession({sourceMapPath});
 
     if (!result.success) {
@@ -75,30 +76,10 @@ export const createIrDebugger = defineTool({
     const sourceMap = session.sourceMap;
     const urlPattern = session.config.urlPattern;
 
-    // Verify that the urlPattern matches at least one script in the browser
-    const page = context.getSelectedPage();
-    const cdpSession = await initializeDebuggerForPage(page, {forceEnable: true});
-    const matchingScripts = await findMatchingScripts(cdpSession, urlPattern);
-
-    if (matchingScripts.length === 0) {
-      // Remove the session since no scripts matched
-      removeSession(sessionId);
-      response.appendResponseLine(`❌ Failed to create IR debugger session`);
-      response.appendResponseLine(`   Error: No scripts found matching URL "${urlPattern}"`);
-      response.appendResponseLine(`   Make sure the target page is loaded with the correct script.`);
-      return;
-    }
-
     response.appendResponseLine(`✅ Session created: ${sessionId}`);
     response.appendResponseLine(`   Source: ${sourceMap.sourceFile} (${sourceMap.mappings.length} mappings)`);
-    response.appendResponseLine(`   URL: ${urlPattern}`);
-    response.appendResponseLine(`   Matched scripts: ${matchingScripts.length}`);
-    for (const script of matchingScripts.slice(0, 3)) {
-      response.appendResponseLine(`     - ${script.url}`);
-    }
-    if (matchingScripts.length > 3) {
-      response.appendResponseLine(`     ... and ${matchingScripts.length - 3} more`);
-    }
+    response.appendResponseLine(`   URL pattern: ${urlPattern}`);
+    response.appendResponseLine(`   Breakpoints will be resolved when the matching script loads.`);
   },
 });
 
