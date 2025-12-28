@@ -38,10 +38,10 @@ export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 export interface IRSessionConfig {
   /** Path to the source map JSON file */
   sourceMapPath: string;
-  /** URL pattern to match the original JS file */
+  /** URL pattern to match the original JS file (derived from sourceFileUrl in source map) */
   urlPattern: string;
-  /** Path to the ASM file (optional, derived from sourceMapPath if not provided) */
-  asmPath?: string;
+  /** Path to the ASM file (derived from sourceMapPath) */
+  asmPath: string;
 }
 
 /**

@@ -50,34 +50,12 @@ export const createIrDebugger = defineTool({
     sourceMapPath: zod
       .string()
       .describe('Path to the source map JSON file that maps IR code to original JS.'),
-    urlPattern: zod
-      .string()
-      .describe('URL pattern (regex) to match the original JS file in the browser.'),
-    asmPath: zod
-      .string()
-      .optional()
-      .describe('Path to the ASM file. If not provided, derived from sourceMapPath by removing .map extension.'),
   },
   handler: async (request, response, context) => {
-    const {sourceMapPath, urlPattern, asmPath} = request.params;
+    const {sourceMapPath} = request.params;
 
-    // First, verify that the urlPattern matches at least one script in the browser
-    const page = context.getSelectedPage();
-    const cdpSession = await initializeDebuggerForPage(page, {forceEnable: true});
-    const matchingScripts = await findMatchingScripts(cdpSession, urlPattern);
-
-    if (matchingScripts.length === 0) {
-      response.appendResponseLine(`❌ Failed to create IR debugger session`);
-      response.appendResponseLine(`   Error: No scripts found matching URL pattern "${urlPattern}"`);
-      response.appendResponseLine(`   Make sure the target page is loaded and the URL pattern is correct.`);
-      return;
-    }
-
-    const result = createSession({
-      sourceMapPath,
-      urlPattern,
-      asmPath,
-    });
+    // First, create the session to parse the source map and get the URL pattern
+    const result = createSession({sourceMapPath});
 
     if (!result.success) {
       const error = result.error;
@@ -95,9 +73,25 @@ export const createIrDebugger = defineTool({
 
     const {sessionId, session} = result;
     const sourceMap = session.sourceMap;
+    const urlPattern = session.config.urlPattern;
+
+    // Verify that the urlPattern matches at least one script in the browser
+    const page = context.getSelectedPage();
+    const cdpSession = await initializeDebuggerForPage(page, {forceEnable: true});
+    const matchingScripts = await findMatchingScripts(cdpSession, urlPattern);
+
+    if (matchingScripts.length === 0) {
+      // Remove the session since no scripts matched
+      removeSession(sessionId);
+      response.appendResponseLine(`❌ Failed to create IR debugger session`);
+      response.appendResponseLine(`   Error: No scripts found matching URL "${urlPattern}"`);
+      response.appendResponseLine(`   Make sure the target page is loaded with the correct script.`);
+      return;
+    }
 
     response.appendResponseLine(`✅ Session created: ${sessionId}`);
     response.appendResponseLine(`   Source: ${sourceMap.sourceFile} (${sourceMap.mappings.length} mappings)`);
+    response.appendResponseLine(`   URL: ${urlPattern}`);
     response.appendResponseLine(`   Matched scripts: ${matchingScripts.length}`);
     for (const script of matchingScripts.slice(0, 3)) {
       response.appendResponseLine(`     - ${script.url}`);
@@ -133,7 +127,7 @@ export const listIrDebuggers = defineTool({
     for (const session of sessions) {
       response.appendResponseLine(`📍 ${session.sessionId}`);
       response.appendResponseLine(`   Source Map: ${session.sourceMapPath}`);
-      response.appendResponseLine(`   URL Pattern: ${session.urlPattern}`);
+      response.appendResponseLine(`   URL: ${session.urlPattern}`);
       response.appendResponseLine(`   ASM Path: ${session.asmPath}`);
       response.appendResponseLine(`   Breakpoints: ${session.breakpointCount}`);
       response.appendResponseLine('');

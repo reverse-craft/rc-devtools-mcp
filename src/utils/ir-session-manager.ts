@@ -166,25 +166,37 @@ export function deriveAsmPath(sourceMapPath: string): string {
 const irSessions = new Map<string, IRSession>();
 
 /**
+ * Input for creating an IR debugging session.
+ */
+export interface CreateSessionInput {
+  /** Path to the source map JSON file */
+  sourceMapPath: string;
+}
+
+/**
  * Creates a new IR debugging session.
- * @param config Session configuration
+ * @param input Session creation input (only sourceMapPath is required)
  * @returns CreateSessionResult with either the session or an error
  */
-export function createSession(config: IRSessionConfig): CreateSessionResult {
+export function createSession(input: CreateSessionInput): CreateSessionResult {
   // Parse the source map
-  const parseResult = parseSourceMap(config.sourceMapPath);
+  const parseResult = parseSourceMap(input.sourceMapPath);
   if (parseResult.success === false) {
     return { success: false, error: parseResult.error };
   }
 
   const sourceMap = parseResult.sourceMap;
 
-  // Derive asmPath if not provided
-  const asmPath = config.asmPath ?? deriveAsmPath(config.sourceMapPath);
+  // Derive asmPath from sourceMapPath
+  const asmPath = deriveAsmPath(input.sourceMapPath);
 
-  // Create session with derived asmPath
+  // Use sourceFileUrl from source map as the URL pattern
+  const urlPattern = sourceMap.sourceFileUrl;
+
+  // Create session config
   const sessionConfig: IRSessionConfig = {
-    ...config,
+    sourceMapPath: input.sourceMapPath,
+    urlPattern,
     asmPath,
   };
 
