@@ -14,6 +14,7 @@ import * as consoleTools from './console.js';
 import * as debuggerTools from './debugger.js';
 import * as inputTools from './input.js';
 import * as interceptTools from './intercept.js';
+import * as irDebuggerTools from './ir-debugger.js';
 import * as networkTools from './network.js';
 import * as pagesTools from './pages.js';
 import * as persistentTools from './persistent.js';
@@ -28,6 +29,7 @@ const tools = [
   ...Object.values(debuggerTools),
   ...Object.values(inputTools),
   ...Object.values(interceptTools),
+  ...Object.values(irDebuggerTools),
   ...Object.values(networkTools),
   ...Object.values(pagesTools),
   ...Object.values(persistentTools),

@@ -5,6 +5,7 @@ A powerful MCP (Model Context Protocol) server for browser debugging and reverse
 ## Features
 
 - **JavaScript Debugging**: Set breakpoints, step through code, inspect variables, and analyze call graphs
+- **IR Debugging**: Debug JSVMP-protected code at the IR (Intermediate Representation) level with source map support
 - **Network Analysis**: Monitor, search, and save network requests with full request/response details
 - **Script Interception**: Replace JavaScript code on-the-fly for testing and reverse engineering
 - **Page Automation**: Navigate pages, interact with elements, and capture screenshots
@@ -275,6 +276,38 @@ List all network requests and show me the API calls
 
 **`disable_debugger`** - Disable the debugger and remove all breakpoints
 - No parameters
+
+#### IR Debugging (JSVMP)
+
+Tools for debugging JSVMP-protected JavaScript at the IR (Intermediate Representation) level. Requires a source map file that maps IR code to original JS locations.
+
+**`create_ir_debugger`** - Create a new IR debugging session
+- `sourceMapPath` (string, required): Path to the source map JSON file
+- `urlPattern` (string, required): Regex pattern to match the original JS file in browser
+- `asmPath` (string, optional): Path to ASM file (defaults to sourceMapPath without .map extension)
+
+**`list_ir_debuggers`** - List all active IR debugging sessions
+- No parameters
+
+**`remove_ir_debugger`** - Remove an IR debugging session and clear its breakpoints
+- `sessionId` (string, required): Session ID to remove
+
+**`ir_set_breakpoint`** - Set a breakpoint at a specific IR line
+- `sessionId` (string, required): IR debugger session ID
+- `irLine` (number, required): IR line number to set breakpoint at
+
+**`ir_remove_breakpoint`** - Remove a breakpoint at a specific IR line
+- `sessionId` (string, required): IR debugger session ID
+- `irLine` (number, required): IR line number of breakpoint to remove
+
+**`ir_clear_breakpoints`** - Clear all breakpoints in an IR session
+- `sessionId` (string, required): IR debugger session ID
+
+**`ir_get_state`** - Get current IR state when paused at a breakpoint
+- `sessionId` (string, required): IR debugger session ID
+- `frameIndex` (number, optional): Call frame index (default: 0)
+- `maxValueLength` (number, optional): Max length for displayed values (default: 300)
+- `contextLines` (number, optional): IR code lines to show around current line (default: 5)
 
 #### XHR/Fetch Breakpoints
 

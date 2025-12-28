@@ -156,3 +156,75 @@ export {ScriptCacheRegistry} from './script-cache-registry.js';
 
 // Script parser
 export {parseScript} from './script-parser.js';
+
+// IR Debugger types
+export {
+  ErrorCodes,
+  type ErrorCode,
+  type IRSessionConfig,
+  type IRSessionInfo,
+  type VMRegisterInfo,
+  type VMRegisters,
+  type VMDispatcher,
+  type VMEntryPoint,
+  type VMInfo,
+  type IRFunctionInfo,
+  type WatchExpression,
+  type BreakpointConfig,
+  type SourceLocation,
+  type IRMapping,
+  type ParsedSourceMap,
+  type IRBreakpointInfo,
+  type IRState,
+  type IRCodeLine,
+  type IRCodeContext,
+  type IRDebuggerError,
+  type SourceMapFile,
+} from './ir-debugger-types.js';
+
+// IR Session Manager
+export {
+  IRSession,
+  createSession,
+  getSession,
+  listSessions,
+  removeSession,
+  clearAllSessions,
+  getSessionCount,
+  deriveAsmPath,
+  type CreateSessionResult,
+  type GetSessionResult,
+  type RemoveSessionResult,
+} from './ir-session-manager.js';
+
+// IR Source Map Parser
+export {
+  parseSourceMap,
+  getMappingByLine,
+  getMappingByAddr,
+  getMappingsByOpcode,
+  getFunction,
+  getFunctionByLine,
+  getFunctionByAddr,
+  type ParseResult as IRParseResult,
+} from './ir-source-map-parser.js';
+
+// IR Condition Builder
+export {
+  fromMapping,
+  combine,
+  buildStackCondition,
+  buildScopeCondition,
+  combineWithMapping,
+} from './ir-condition-builder.js';
+
+// IR State Extractor
+export {
+  extractState,
+  formatState,
+  truncateValue,
+  extractAndFormatState,
+  type ExtractStateResult,
+  type ExtractStateOptions,
+  type FormatStateOptions,
+} from './ir-state-extractor.js';
