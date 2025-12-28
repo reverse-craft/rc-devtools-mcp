@@ -54,6 +54,18 @@ export interface ScopeInfo {
   name?: string;
 }
 
+/**
+ * Stored breakpoint information including condition and original line number.
+ */
+export interface StoredBreakpointInfo {
+  /** The original requested line number (1-based) */
+  lineNumber: number;
+  /** The original requested column number (0-based) */
+  columnNumber?: number;
+  /** The condition expression, if any */
+  condition?: string;
+}
+
 export interface DebuggerState {
   enabled: boolean;
   isPaused: boolean;
@@ -61,9 +73,9 @@ export interface DebuggerState {
   /** 
    * Tracks CDP breakpoint IDs that are currently active.
    * This is used to sync with CDP's actual state.
-   * Key: CDP breakpoint ID, Value: resolved locations
+   * Key: CDP breakpoint ID, Value: stored breakpoint info
    */
-  activeBreakpointIds: Set<string>;
+  activeBreakpoints: Map<string, StoredBreakpointInfo>;
   /**
    * Tracks whether the user has explicitly disabled the debugger.
    * When true, the debugger should NOT be re-enabled after page refresh.
@@ -79,7 +91,7 @@ export function getDebuggerState(page: Page): DebuggerState {
     state = {
       enabled: false,
       isPaused: false,
-      activeBreakpointIds: new Set(),
+      activeBreakpoints: new Map(),
       userDisabled: false,
     };
     debuggerStates.set(page, state);
@@ -108,58 +120,41 @@ export interface ActiveBreakpointInfo {
  */
 export async function getActiveBreakpoints(page: Page): Promise<ActiveBreakpointInfo[]> {
   const state = getDebuggerState(page);
-  const session = await getCdpSession(page);
   const activeBreakpoints: ActiveBreakpointInfo[] = [];
-  const invalidIds: string[] = [];
   
-  // Verify each tracked breakpoint is still valid by checking if it can be removed
-  // (CDP will throw if the breakpoint doesn't exist)
-  for (const bpId of state.activeBreakpointIds) {
-    try {
-      // Parse the breakpoint ID to extract location info
-      // CDP breakpoint IDs from setBreakpointByUrl have format like: "1:14:0:.*app\\.js.*"
-      // Format: lineNumber:columnNumber:scriptHash:urlRegex
-      const parts = bpId.split(':');
-      if (parts.length >= 4) {
-        const lineNumber = parseInt(parts[0], 10) + 1; // Convert to 1-based
-        const columnNumber = parseInt(parts[1], 10);
-        const urlRegex = parts.slice(3).join(':'); // URL regex might contain colons
-        
-        activeBreakpoints.push({
-          breakpointId: bpId,
-          url: urlRegex,
-          lineNumber,
-          columnNumber,
-        });
-      } else {
-        // For other breakpoint ID formats, just include the ID
-        activeBreakpoints.push({
-          breakpointId: bpId,
-          url: '(unknown)',
-          lineNumber: 0,
-          columnNumber: 0,
-        });
-      }
-    } catch {
-      // Breakpoint no longer exists, mark for removal
-      invalidIds.push(bpId);
+  for (const [bpId, storedInfo] of state.activeBreakpoints) {
+    // Parse the breakpoint ID to extract URL pattern
+    // CDP breakpoint IDs from setBreakpointByUrl have format like: "1:14:0:.*app\\.js.*"
+    // Format: lineNumber:columnNumber:scriptHash:urlRegex
+    const parts = bpId.split(':');
+    let urlRegex = '(unknown)';
+    
+    if (parts.length >= 4) {
+      urlRegex = parts.slice(3).join(':'); // URL regex might contain colons
     }
-  }
-  
-  // Clean up invalid breakpoint IDs
-  for (const id of invalidIds) {
-    state.activeBreakpointIds.delete(id);
+    
+    activeBreakpoints.push({
+      breakpointId: bpId,
+      url: urlRegex,
+      lineNumber: storedInfo.lineNumber,
+      columnNumber: storedInfo.columnNumber ?? 0,
+      condition: storedInfo.condition,
+    });
   }
   
   return activeBreakpoints;
 }
 
 /**
- * Track a newly set breakpoint
+ * Track a newly set breakpoint with its metadata.
+ * 
+ * @param page - The page the breakpoint is set on
+ * @param breakpointId - The CDP breakpoint ID
+ * @param info - The breakpoint metadata (line number, column, condition)
  */
-export function trackBreakpoint(page: Page, breakpointId: string): void {
+export function trackBreakpoint(page: Page, breakpointId: string, info: StoredBreakpointInfo): void {
   const state = getDebuggerState(page);
-  state.activeBreakpointIds.add(breakpointId);
+  state.activeBreakpoints.set(breakpointId, info);
 }
 
 /**
@@ -167,7 +162,7 @@ export function trackBreakpoint(page: Page, breakpointId: string): void {
  */
 export function untrackBreakpoint(page: Page, breakpointId: string): void {
   const state = getDebuggerState(page);
-  state.activeBreakpointIds.delete(breakpointId);
+  state.activeBreakpoints.delete(breakpointId);
 }
 
 /**
@@ -175,7 +170,7 @@ export function untrackBreakpoint(page: Page, breakpointId: string): void {
  */
 export function getBreakpointCount(page: Page): number {
   const state = getDebuggerState(page);
-  return state.activeBreakpointIds.size;
+  return state.activeBreakpoints.size;
 }
 
 /**
@@ -183,7 +178,7 @@ export function getBreakpointCount(page: Page): number {
  */
 export function clearTrackedBreakpoints(page: Page): void {
   const state = getDebuggerState(page);
-  state.activeBreakpointIds.clear();
+  state.activeBreakpoints.clear();
 }
 
 // Track whether we've set up navigation listeners per page

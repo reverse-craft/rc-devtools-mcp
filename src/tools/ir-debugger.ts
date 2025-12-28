@@ -266,7 +266,11 @@ export const irSetBreakpoint = defineTool({
       const locations = (result as any).locations || [];
 
       // Track the breakpoint (will resolve when script loads if not already)
-      trackBreakpoint(page, cdpBreakpointId);
+      trackBreakpoint(page, cdpBreakpointId, {
+        lineNumber: mapping.source.line,
+        columnNumber: mapping.source.column,
+        condition: baseCondition,
+      });
 
       // Store IR breakpoint metadata for list_breakpoints integration
       setIRBreakpointMetadata(cdpBreakpointId, {

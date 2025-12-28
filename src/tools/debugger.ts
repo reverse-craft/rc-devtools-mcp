@@ -738,7 +738,11 @@ export const setBreakpoint = defineTool({
 
       const locations = (result as any).locations;
       if (locations && locations.length > 0) {
-        trackBreakpoint(page, cdpBreakpointId);
+        trackBreakpoint(page, cdpBreakpointId, {
+          lineNumber,
+          columnNumber: snappedColumn,
+          condition,
+        });
         
         const firstLoc = locations[0];
         const resolvedLine = firstLoc.lineNumber + 1;
@@ -1251,7 +1255,7 @@ export const getDebuggerStatus = defineTool({
       return true;
     };
 
-    const breakpointCount = state.activeBreakpointIds.size;
+    const breakpointCount = state.activeBreakpoints.size;
     
     addLine('🔍 Debugger Status:');
     addLine(`   Enabled: ${state.enabled ? 'Yes' : 'No'}`);
@@ -1916,7 +1920,7 @@ export const disableDebugger = defineTool({
       await session.send('Debugger.disable');
       state.enabled = false;
       state.userDisabled = true;
-      state.activeBreakpointIds.clear();
+      state.activeBreakpoints.clear();
       state.isPaused = false;
       state.pausedCallFrames = undefined;
 
