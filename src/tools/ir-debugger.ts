@@ -251,27 +251,23 @@ export const irSetBreakpoint = defineTool({
     try {
       const result = await cdpSession.send('Debugger.setBreakpointByUrl', cdpParams);
       const cdpBreakpointId = (result as any).breakpointId;
-      const locations = (result as any).locations;
+      const locations = (result as any).locations || [];
 
-      if (locations && locations.length > 0) {
-        // Track the breakpoint
-        trackBreakpoint(page, cdpBreakpointId);
+      // Track the breakpoint (will resolve when script loads if not already)
+      trackBreakpoint(page, cdpBreakpointId);
 
-        // Store in IR session
-        irSession.addBreakpoint(breakpointKey, {
-          irLine: irLine,
-          irAddr: mapping.irAddr,
-          cdpBreakpointId,
-          condition: baseCondition,
-        });
+      // Store in IR session
+      irSession.addBreakpoint(breakpointKey, {
+        irLine: irLine,
+        irAddr: mapping.irAddr,
+        cdpBreakpointId,
+        condition: baseCondition,
+      });
 
+      if (locations.length > 0) {
         response.appendResponseLine(`✅ Breakpoint set at IR line ${irLine} (addr: ${mapping.irAddr}, ${mapping.opcodeName})`);
       } else {
-        // No locations resolved, remove the breakpoint
-        await cdpSession.send('Debugger.removeBreakpoint', {
-          breakpointId: cdpBreakpointId,
-        });
-        response.appendResponseLine(`❌ Failed to set IR breakpoint: No matching scripts found for URL pattern "${irSession.config.urlPattern}"`);
+        response.appendResponseLine(`✅ Breakpoint set at IR line ${irLine} (addr: ${mapping.irAddr}, ${mapping.opcodeName}) - pending script load`);
       }
     } catch (error) {
       response.appendResponseLine(`❌ Failed to set IR breakpoint: ${error instanceof Error ? error.message : String(error)}`);
