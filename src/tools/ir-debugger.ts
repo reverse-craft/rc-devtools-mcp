@@ -71,7 +71,18 @@ export const loadIrSourceMap = defineTool({
       } else if (error.code === ErrorCodes.INVALID_JSON) {
         response.appendResponseLine(`   The source map file contains invalid JSON.`);
       } else if (error.code === ErrorCodes.INVALID_SOURCE_MAP) {
-        response.appendResponseLine(`   The source map file is missing required fields.`);
+        response.appendResponseLine(`   The source map file is missing required fields or has incorrect structure.`);
+        response.appendResponseLine(``);
+        if (error.details?.errors && Array.isArray(error.details.errors)) {
+          response.appendResponseLine(`   Validation errors (${error.details.errorCount}):`);
+          for (const validationError of error.details.errors as string[]) {
+            response.appendResponseLine(`   ${validationError}`);
+          }
+          response.appendResponseLine(``);
+          response.appendResponseLine(`   💡 Tip: This appears to be an old source map format.`);
+          response.appendResponseLine(`      Use the conversion script to migrate:`);
+          response.appendResponseLine(`      node scripts/convert-sourcemap.js ${sourceMapPath}`);
+        }
       }
       return;
     }

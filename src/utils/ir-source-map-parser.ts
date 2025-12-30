@@ -27,46 +27,117 @@ export type ParseResult =
   | { success: false; error: IRDebuggerError };
 
 /**
- * Validates the raw source map file structure.
+ * Validation result with detailed error information.
  */
-function validateSourceMapFile(data: unknown): data is SourceMapFile {
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Validates the raw source map file structure and returns detailed errors.
+ */
+function validateSourceMapFile(data: unknown): ValidationResult {
+  const errors: string[] = [];
+
   if (typeof data !== 'object' || data === null) {
-    return false;
+    errors.push('Source map must be a JSON object');
+    return { valid: false, errors };
   }
 
   const obj = data as Record<string, unknown>;
 
   // Check required top-level fields
-  if (typeof obj.version !== 'number') return false;
-  if (typeof obj.file !== 'string') return false;
-  if (typeof obj.sourceFile !== 'string') return false;
-  if (typeof obj.sourceFileUrl !== 'string') return false;
-  if (typeof obj.vm !== 'object' || obj.vm === null) return false;
-  if (!Array.isArray(obj.functions)) return false;
-  if (!Array.isArray(obj.mappings)) return false;
+  if (typeof obj.version !== 'number') {
+    errors.push('Missing or invalid field: "version" (must be a number)');
+  }
+  if (typeof obj.file !== 'string') {
+    errors.push('Missing or invalid field: "file" (must be a string)');
+  }
+  if (typeof obj.sourceFile !== 'string') {
+    errors.push('Missing or invalid field: "sourceFile" (must be a string)');
+  }
+  if (typeof obj.sourceFileUrl !== 'string') {
+    errors.push('Missing or invalid field: "sourceFileUrl" (must be a string)');
+    errors.push('  → This field is required for URL pattern matching');
+    errors.push('  → Hint: Add "sourceFileUrl": "<your-js-file-url>" to the source map');
+  }
+  if (typeof obj.vm !== 'object' || obj.vm === null) {
+    errors.push('Missing or invalid field: "vm" (must be an object)');
+  } else {
+    // Check VM structure
+    const vm = obj.vm as Record<string, unknown>;
+    
+    if (typeof vm.dispatcher !== 'object' || vm.dispatcher === null) {
+      errors.push('Missing or invalid field: "vm.dispatcher" (must be an object)');
+      errors.push('  → Expected structure: { "function": "...", "line": 123, "column": 0 }');
+      if (vm.dispatcherLocation) {
+        errors.push('  → Found "vm.dispatcherLocation" instead - this is an old format');
+        errors.push('  → Rename "dispatcherLocation" to "dispatcher" and add "function" field');
+      }
+    } else {
+      const dispatcher = vm.dispatcher as Record<string, unknown>;
+      if (typeof dispatcher.function !== 'string') {
+        errors.push('Missing or invalid field: "vm.dispatcher.function" (must be a string)');
+      }
+      if (typeof dispatcher.line !== 'number') {
+        errors.push('Missing or invalid field: "vm.dispatcher.line" (must be a number)');
+      }
+      if (typeof dispatcher.column !== 'number') {
+        errors.push('Missing or invalid field: "vm.dispatcher.column" (must be a number)');
+      }
+    }
 
-  // Check VM structure
-  const vm = obj.vm as Record<string, unknown>;
-  if (typeof vm.dispatcher !== 'object' || vm.dispatcher === null) return false;
-  if (typeof vm.registers !== 'object' || vm.registers === null) return false;
-
-  // Check dispatcher
-  const dispatcher = vm.dispatcher as Record<string, unknown>;
-  if (typeof dispatcher.function !== 'string') return false;
-  if (typeof dispatcher.line !== 'number') return false;
-  if (typeof dispatcher.column !== 'number') return false;
-
-  // Check registers
-  const registers = vm.registers as Record<string, unknown>;
-  const requiredRegisters = ['ip', 'sp', 'stack', 'bytecode', 'scope', 'constants'];
-  for (const reg of requiredRegisters) {
-    const regInfo = registers[reg] as Record<string, unknown> | undefined;
-    if (!regInfo || typeof regInfo.name !== 'string' || typeof regInfo.description !== 'string') {
-      return false;
+    if (typeof vm.registers !== 'object' || vm.registers === null) {
+      errors.push('Missing or invalid field: "vm.registers" (must be an object)');
+      if (vm.components) {
+        errors.push('  → Found "vm.components" instead - this is an old format');
+        errors.push('  → Rename "components" to "registers" and update field names:');
+        errors.push('     • instructionPointer → ip');
+        errors.push('     • stackPointer → sp');
+        errors.push('     • virtualStack → stack');
+        errors.push('     • bytecodeArray → bytecode');
+        errors.push('     • constantPool → constants');
+        errors.push('     • scopeChain → scope');
+      }
+    } else {
+      const registers = vm.registers as Record<string, unknown>;
+      const requiredRegisters = ['ip', 'sp', 'stack', 'bytecode', 'scope', 'constants'];
+      for (const reg of requiredRegisters) {
+        const regInfo = registers[reg] as Record<string, unknown> | undefined;
+        if (!regInfo) {
+          errors.push(`Missing field: "vm.registers.${reg}"`);
+        } else {
+          if (typeof regInfo.name !== 'string') {
+            errors.push(`Missing or invalid field: "vm.registers.${reg}.name" (must be a string)`);
+          }
+          if (typeof regInfo.description !== 'string') {
+            errors.push(`Missing or invalid field: "vm.registers.${reg}.description" (must be a string)`);
+          }
+        }
+      }
     }
   }
 
-  return true;
+  if (!Array.isArray(obj.functions)) {
+    errors.push('Missing or invalid field: "functions" (must be an array)');
+  } else if (obj.functions.length > 0) {
+    const firstFunc = obj.functions[0] as Record<string, unknown>;
+    if (typeof firstFunc.id !== 'number' && typeof firstFunc.index === 'number') {
+      errors.push('Invalid field in "functions": found "index" instead of "id"');
+      errors.push('  → This is an old format - rename "index" to "id" in all function objects');
+    }
+    if (typeof firstFunc.params !== 'number' && typeof firstFunc.locals === 'number') {
+      errors.push('Invalid field in "functions": found "locals" instead of "params"');
+      errors.push('  → This is an old format - rename "locals" to "params" in all function objects');
+    }
+  }
+
+  if (!Array.isArray(obj.mappings)) {
+    errors.push('Missing or invalid field: "mappings" (must be an array)');
+  }
+
+  return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -150,19 +221,27 @@ export function parseSourceMap(sourceMapPath: string): ParseResult {
   }
 
   // Validate structure
-  if (!validateSourceMapFile(data)) {
+  const validation = validateSourceMapFile(data);
+  if (!validation.valid) {
     return {
       success: false,
       error: {
         code: ErrorCodes.INVALID_SOURCE_MAP,
-        message: 'Invalid source map structure: missing or invalid required fields',
-        details: { path: sourceMapPath },
+        message: 'Invalid source map structure',
+        details: { 
+          path: sourceMapPath,
+          errors: validation.errors,
+          errorCount: validation.errors.length
+        },
       },
     };
   }
 
+  // Type assertion after validation
+  const sourceMapData = data as SourceMapFile;
+
   // Convert raw data to typed structures
-  const mappings: IRMapping[] = data.mappings.map((m) => ({
+  const mappings: IRMapping[] = sourceMapData.mappings.map((m) => ({
     irLine: m.irLine,
     irAddr: m.irAddr,
     opcode: m.opcode,
@@ -182,7 +261,7 @@ export function parseSourceMap(sourceMapPath: string): ParseResult {
     semantic: m.semantic,
   }));
 
-  const functions: IRFunctionInfo[] = data.functions.map((f) => ({
+  const functions: IRFunctionInfo[] = sourceMapData.functions.map((f) => ({
     id: f.id,
     name: f.name,
     bytecodeRange: f.bytecodeRange,
@@ -196,52 +275,52 @@ export function parseSourceMap(sourceMapPath: string): ParseResult {
 
   // Construct parsed source map
   const sourceMap: ParsedSourceMap = {
-    version: data.version,
-    file: data.file,
-    sourceFile: data.sourceFile,
-    sourceFileUrl: data.sourceFileUrl,
+    version: sourceMapData.version,
+    file: sourceMapData.file,
+    sourceFile: sourceMapData.sourceFile,
+    sourceFileUrl: sourceMapData.sourceFileUrl,
     vm: {
       dispatcher: {
-        function: data.vm.dispatcher.function,
-        line: data.vm.dispatcher.line,
-        column: data.vm.dispatcher.column,
-        description: data.vm.dispatcher.description || '',
+        function: sourceMapData.vm.dispatcher.function,
+        line: sourceMapData.vm.dispatcher.line,
+        column: sourceMapData.vm.dispatcher.column,
+        description: sourceMapData.vm.dispatcher.description || '',
       },
       registers: {
         ip: {
-          name: data.vm.registers.ip.name,
-          description: data.vm.registers.ip.description,
+          name: sourceMapData.vm.registers.ip.name,
+          description: sourceMapData.vm.registers.ip.description,
         },
         sp: {
-          name: data.vm.registers.sp.name,
-          description: data.vm.registers.sp.description,
+          name: sourceMapData.vm.registers.sp.name,
+          description: sourceMapData.vm.registers.sp.description,
         },
         stack: {
-          name: data.vm.registers.stack.name,
-          description: data.vm.registers.stack.description,
+          name: sourceMapData.vm.registers.stack.name,
+          description: sourceMapData.vm.registers.stack.description,
         },
         bytecode: {
-          name: data.vm.registers.bytecode.name,
-          description: data.vm.registers.bytecode.description,
+          name: sourceMapData.vm.registers.bytecode.name,
+          description: sourceMapData.vm.registers.bytecode.description,
         },
         scope: {
-          name: data.vm.registers.scope.name,
-          description: data.vm.registers.scope.description,
+          name: sourceMapData.vm.registers.scope.name,
+          description: sourceMapData.vm.registers.scope.description,
         },
         constants: {
-          name: data.vm.registers.constants.name,
-          description: data.vm.registers.constants.description,
+          name: sourceMapData.vm.registers.constants.name,
+          description: sourceMapData.vm.registers.constants.description,
         },
       },
-      entryPoint: data.vm.entryPoint
+      entryPoint: sourceMapData.vm.entryPoint
         ? {
-            line: data.vm.entryPoint.line,
-            column: data.vm.entryPoint.column,
-            description: data.vm.entryPoint.description || '',
+            line: sourceMapData.vm.entryPoint.line,
+            column: sourceMapData.vm.entryPoint.column,
+            description: sourceMapData.vm.entryPoint.description || '',
           }
         : {
-            line: data.vm.dispatcher.line,
-            column: data.vm.dispatcher.column,
+            line: sourceMapData.vm.dispatcher.line,
+            column: sourceMapData.vm.dispatcher.column,
             description: '',
           },
     },
