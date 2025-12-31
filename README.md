@@ -278,40 +278,6 @@ List all network requests and show me the API calls
 **`disable_debugger`** - Disable the debugger and remove all breakpoints
 - No parameters
 
-#### IR Debugging (JSVMP)
-
-Tools for debugging JSVMP-protected JavaScript at the IR (Intermediate Representation) level. Requires a source map file that maps IR code to original JS locations.
-
-The `get_debugger_status` tool automatically detects IR context when paused in JSVMP code and displays IR line, opcode, semantic description, and VM register values. The `list_breakpoints` tool also identifies IR breakpoints and shows their IR metadata.
-
-**`load_ir_source_map`** - Load an IR source map file for JSVMP debugging
-- `sourceMapPath` (string, required): Path to the source map JSON file
-- Returns a unique `irId` for subsequent operations
-
-**`list_ir_source_maps`** - List all loaded IR source maps
-- No parameters
-- Shows `irId`, source map path, URL pattern, and breakpoint count for each
-
-**`unload_ir_source_map`** - Unload an IR source map and clear all associated breakpoints
-- `irId` (string, required): The IR ID returned by `load_ir_source_map`
-
-**`ir_set_breakpoint`** - Set a breakpoint at a specific IR line
-- `irId` (string, required): The IR ID from `load_ir_source_map`
-- `irLine` (number, required): IR line number to set breakpoint at
-
-**`ir_remove_breakpoint`** - Remove a breakpoint at a specific IR line
-- `irId` (string, required): The IR ID from `load_ir_source_map`
-- `irLine` (number, required): IR line number of breakpoint to remove
-
-**`ir_clear_breakpoints`** - Clear all breakpoints for a specific IR source map
-- `irId` (string, required): The IR ID from `load_ir_source_map`
-
-**`ir_get_state`** - Get detailed IR state when paused at a breakpoint
-- `irId` (string, optional): The IR ID (auto-detects if not provided)
-- `frameIndex` (number, optional): Call frame index (default: 0)
-- `maxValueLength` (number, optional): Max length for displayed values (default: 300)
-- `contextLines` (number, optional): IR code lines to show around current line (default: 5)
-
 #### XHR/Fetch Breakpoints
 
 **`set_xhr_breakpoint`** - Set a breakpoint on XHR/Fetch requests

@@ -33,7 +33,6 @@ import {
   untrackXhrBreakpoint,
   getTrackedXhrBreakpoints,
   clearTrackedXhrBreakpoints,
-  getIRBreakpointMetadata,
 } from '../utils/debugger-utils.js';
 import {paginate} from '../utils/pagination.js';
 import {
@@ -50,8 +49,6 @@ import {
 import {clearParseResultCache} from './analysis.js';
 import {ToolCategory} from './categories.js';
 import {defineTool} from './tool-definition.js';
-import {findSourceMapByUrl} from '../utils/ir-session-manager.js';
-import {extractState, formatState} from '../utils/ir-state-extractor.js';
 
 
 /**
@@ -84,32 +81,6 @@ function formatValue(
     };
   }
   return {formatted: str, truncated: false};
-}
-
-/**
- * Format a VM value for display in IR context, with truncation for long values.
- */
-function formatVMValue(value: unknown, maxLength: number): string {
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
-
-  let str: string;
-  if (typeof value === 'string') {
-    str = JSON.stringify(value);
-  } else if (typeof value === 'object') {
-    try {
-      str = JSON.stringify(value);
-    } catch {
-      str = String(value);
-    }
-  } else {
-    str = String(value);
-  }
-
-  if (str.length > maxLength) {
-    return str.substring(0, maxLength) + ' [truncated]';
-  }
-  return str;
 }
 
 /**
@@ -893,12 +864,6 @@ export const listBreakpoints = defineTool({
       response.appendResponseLine(`   URL pattern: ${bp.url}`);
       response.appendResponseLine(`   Line: ${bp.lineNumber}, Column: ${bp.columnNumber}`);
       
-      // Check if this is an IR breakpoint and display IR information
-      const irMetadata = getIRBreakpointMetadata(bp.breakpointId);
-      if (irMetadata) {
-        response.appendResponseLine(`   🔧 IR: ID=${irMetadata.irId}, Line=${irMetadata.irLine}, Opcode=${irMetadata.opcodeName}`);
-      }
-      
       if (bp.condition) {
         response.appendResponseLine(`   Condition: ${bp.condition}`);
       }
@@ -1201,7 +1166,6 @@ export const getDebuggerStatus = defineTool({
     maxOutputLines: zod.number().int().positive().default(DEFAULT_MAX_OUTPUT_LINES).optional(),
     maxCallStackFrames: zod.number().int().positive().default(DEFAULT_MAX_CALL_STACK_FRAMES).optional(),
     maxLineLength: zod.number().int().positive().default(500).optional(),
-    showIRContext: zod.boolean().default(true).optional().describe('Whether to show IR context if available when paused in JSVMP code (default: true).'),
   },
   handler: async (request, response, context) => {
     const page = context.getSelectedPage();
@@ -1360,119 +1324,6 @@ export const getDebuggerStatus = defineTool({
           const errorMessage = error instanceof Error ? error.message : String(error);
           addLine(`   ⚠️ Failed to inspect scope variables: ${errorMessage}`);
           logger(`[debugger] Error inspecting scope variables: ${error}`);
-        }
-      }
-
-      // IR Context Detection and Display (Requirements 7.1-7.5)
-      const showIRContext = request.params.showIRContext ?? true;
-      if (showIRContext && !isTruncated) {
-        // Get the paused URL from the current frame
-        let pausedUrl = frame.url;
-        if (!pausedUrl) {
-          const scriptInfo = scriptCache.get(frame.location.scriptId);
-          pausedUrl = scriptInfo?.url || '';
-        }
-
-        // Check if there's a matching IR source map
-        if (pausedUrl) {
-          const findResult = findSourceMapByUrl(pausedUrl);
-          if (findResult.success) {
-            const irSession = findResult.session;
-            
-            // Extract IR state
-            const extractResult = await extractState(
-              session,
-              irSession,
-              state,
-              { frameIndex, contextLines: 5, maxValueLength: maxLineLength }
-            );
-
-            if (extractResult.success) {
-              addLine('');
-              addLine('🔧 IR Context:');
-              
-              const irState = extractResult.state;
-              
-              // Display current IR location info (Requirement 7.2)
-              addLine(`   IR Line: ${irState.irLine}, PC: ${irState.irAddr}`);
-              addLine(`   Opcode: ${irState.opcodeName} (${irState.opcode})`);
-              addLine(`   Semantic: ${irState.semantic}`);
-              
-              // Display IR code context (Requirement 7.3)
-              if (irState.codeContext && irState.codeContext.lines.length > 0) {
-                addLine('');
-                addLine('   📜 IR Code:');
-                for (const line of irState.codeContext.lines) {
-                  const marker = line.isCurrent ? '→' : ' ';
-                  const lineNumStr = String(line.lineNumber).padStart(6, ' ');
-                  addLine(`   ${marker} ${lineNumStr}: ${line.text}`);
-                }
-              }
-              
-              // Display VM register values (Requirement 7.4)
-              const variables = irState.variables;
-              const registerNames = ['$pc', '$sp', '$opcode'];
-              const registers: Array<{name: string; value: unknown}> = [];
-              const stackVars: Array<{name: string; value: unknown}> = [];
-              const scopeVars: Array<{name: string; value: unknown}> = [];
-              
-              for (const [name, value] of Object.entries(variables)) {
-                if (registerNames.includes(name)) {
-                  registers.push({name, value});
-                } else if (name.startsWith('$stack[')) {
-                  stackVars.push({name, value});
-                } else if (name.startsWith('$scope[')) {
-                  scopeVars.push({name, value});
-                }
-              }
-              
-              // Sort stack and scope by index
-              const extractIndex = (name: string): number => {
-                const match = name.match(/\[(\d+)\]/);
-                return match ? parseInt(match[1], 10) : 0;
-              };
-              stackVars.sort((a, b) => extractIndex(a.name) - extractIndex(b.name));
-              scopeVars.sort((a, b) => extractIndex(a.name) - extractIndex(b.name));
-              
-              if (registers.length > 0 || stackVars.length > 0 || scopeVars.length > 0) {
-                addLine('');
-                addLine('   📊 VM State:');
-                
-                // Display registers
-                for (const {name, value} of registers) {
-                  const formattedValue = formatVMValue(value, maxLineLength);
-                  addLine(`      ${name}: ${formattedValue}`);
-                }
-                
-                // Display stack (limit to first 5 entries)
-                if (stackVars.length > 0) {
-                  const displayStack = stackVars.slice(0, 5);
-                  for (const {name, value} of displayStack) {
-                    const formattedValue = formatVMValue(value, maxLineLength);
-                    addLine(`      ${name}: ${formattedValue}`);
-                  }
-                  if (stackVars.length > 5) {
-                    addLine(`      ... and ${stackVars.length - 5} more stack entries`);
-                  }
-                }
-                
-                // Display scope (limit to first 5 entries)
-                if (scopeVars.length > 0) {
-                  const displayScope = scopeVars.slice(0, 5);
-                  for (const {name, value} of displayScope) {
-                    const formattedValue = formatVMValue(value, maxLineLength);
-                    addLine(`      ${name}: ${formattedValue}`);
-                  }
-                  if (scopeVars.length > 5) {
-                    addLine(`      ... and ${scopeVars.length - 5} more scope entries`);
-                  }
-                }
-              }
-              
-              addLine('');
-              addLine('   ℹ️ Use ir_get_state for full IR details.');
-            }
-          }
         }
       }
     }
