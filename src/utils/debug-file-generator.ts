@@ -134,11 +134,11 @@ export interface Logger {
 }
 
 /**
- * Default console logger
+ * Default console logger - outputs JSON format for MCP compatibility
  */
 const defaultLogger: Logger = {
-  log: (message: string) => console.log(`[DebugFileGenerator] ${message}`),
-  error: (message: string) => console.error(`[DebugFileGenerator] ${message}`),
+  log: (message: string) => console.error(JSON.stringify({ level: 'info', source: 'DebugFileGenerator', message })),
+  error: (message: string) => console.error(JSON.stringify({ level: 'error', source: 'DebugFileGenerator', message })),
 };
 
 // ==========================================

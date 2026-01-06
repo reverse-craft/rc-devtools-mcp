@@ -24,7 +24,7 @@ export function saveLogsToFile(fileName: string): fs.WriteStream {
     logFile.write(`${chunks.join(' ')}\n`);
   };
   logFile.on('error', function (error) {
-    console.error(`Error when opening/writing to log file: ${error.message}`);
+    console.error(JSON.stringify({ level: 'error', message: `Error when opening/writing to log file: ${error.message}` }));
     logFile.end();
     process.exit(1);
   });

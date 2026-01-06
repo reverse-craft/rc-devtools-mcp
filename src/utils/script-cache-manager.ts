@@ -41,7 +41,8 @@ export class ScriptCacheManager {
       await fs.mkdir(this.tempDir, { recursive: true });
       this.initialized = true;
     } catch (error) {
-      console.error(`Failed to create temp directory: ${error}`);
+      // Log to stderr in JSON format for MCP compatibility
+      console.error(JSON.stringify({ level: 'error', message: `Failed to create temp directory: ${error}` }));
       throw error;
     }
   }
@@ -76,7 +77,8 @@ export class ScriptCacheManager {
 
       return filePath;
     } catch (error) {
-      console.error(`Failed to cache script ${scriptId}: ${error}`);
+      // Log to stderr in JSON format for MCP compatibility
+      console.error(JSON.stringify({ level: 'error', message: `Failed to cache script ${scriptId}: ${error}` }));
       return undefined;
     }
   }
@@ -170,7 +172,8 @@ export class ScriptCacheManager {
       this.filePathToScriptId.clear();
       this.initialized = false;
     } catch (error) {
-      console.error(`Failed to cleanup script cache: ${error}`);
+      // Log to stderr in JSON format for MCP compatibility
+      console.error(JSON.stringify({ level: 'error', message: `Failed to cleanup script cache: ${error}` }));
     }
   }
 }

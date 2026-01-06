@@ -58,7 +58,7 @@ class ScriptCacheRegistryImpl {
   async cleanupAll(): Promise<void> {
     // WeakMap doesn't support iteration, so we can't clean up all managers
     // This method is provided for API completeness but has limited functionality
-    console.warn('cleanupAll: WeakMap does not support iteration. Individual sessions should be cleaned up via remove().');
+    console.error(JSON.stringify({ level: 'warn', message: 'cleanupAll: WeakMap does not support iteration. Individual sessions should be cleaned up via remove().' }));
   }
 }
 

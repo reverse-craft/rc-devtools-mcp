@@ -34,6 +34,40 @@ import {ToolCategory} from './categories.js';
 import {defineTool} from './tool-definition.js';
 
 // ==========================================
+// Global Interception Configuration
+// ==========================================
+
+/**
+ * Global interception config - shared across all pages
+ * This is the key difference from before: we store config globally, not per-page
+ */
+interface GlobalInterceptionConfig {
+  scriptPattern: string;
+  debugFilePath: string;
+}
+
+let globalInterceptionConfig: GlobalInterceptionConfig | null = null;
+
+/**
+ * Set global interception config
+ */
+export function setGlobalInterceptionConfig(config: GlobalInterceptionConfig | null): void {
+  globalInterceptionConfig = config;
+  logger(`[vmasm] Global interception config ${config ? 'SET' : 'CLEARED'}`);
+  if (config) {
+    logger(`[vmasm]   scriptPattern: ${config.scriptPattern}`);
+    logger(`[vmasm]   debugFilePath: ${config.debugFilePath}`);
+  }
+}
+
+/**
+ * Get global interception config
+ */
+export function getGlobalInterceptionConfig(): GlobalInterceptionConfig | null {
+  return globalInterceptionConfig;
+}
+
+// ==========================================
 // Fetch Interception for VMASM Debug Files
 // ==========================================
 
@@ -43,47 +77,26 @@ import {defineTool} from './tool-definition.js';
 const vmasmInitializedPages = new WeakSet<Page>();
 
 /**
- * Store interception configs per page
+ * Track CDP sessions per page for cleanup
  */
-const pageInterceptionConfigs = new WeakMap<Page, Map<string, InterceptionConfig>>();
-
-/**
- * Get or create the interception configs map for a page.
- */
-function getPageInterceptionConfigs(page: Page): Map<string, InterceptionConfig> {
-  let configs = pageInterceptionConfigs.get(page);
-  if (!configs) {
-    configs = new Map();
-    pageInterceptionConfigs.set(page, configs);
-  }
-  return configs;
-}
+const pageCdpSessions = new WeakMap<Page, CDPSession>();
 
 /**
  * Handle Fetch.requestPaused event for vmasm debug file interception.
  */
 async function handleVmasmRequestPaused(
   session: CDPSession,
-  page: Page,
   event: any
 ): Promise<void> {
   const {requestId, request} = event;
   const url = request.url;
-  const configs = getPageInterceptionConfigs(page);
 
   logger(`[vmasm] Fetch.requestPaused: ${url}`);
 
-  // Find matching config by URL pattern
-  let matchedConfig: InterceptionConfig | undefined;
-  for (const config of configs.values()) {
-    if (url.includes(config.scriptPattern) || config.scriptPattern === url) {
-      matchedConfig = config;
-      break;
-    }
-  }
-
-  if (!matchedConfig) {
-    logger(`[vmasm] No matching config, continuing request`);
+  // Get global config
+  const config = globalInterceptionConfig;
+  if (!config) {
+    logger(`[vmasm] No global config, continuing request`);
     try {
       await session.send('Fetch.continueRequest', {requestId});
     } catch (error) {
@@ -92,15 +105,32 @@ async function handleVmasmRequestPaused(
     return;
   }
 
-  logger(`[vmasm] Matched pattern: ${matchedConfig.scriptPattern}`);
-  logger(`[vmasm] Debug file: ${matchedConfig.debugFilePath}`);
+  // Check if URL matches the pattern
+  const isMatch = url.includes(config.scriptPattern) || config.scriptPattern === url;
+  logger(`[vmasm] Pattern: ${config.scriptPattern}, Match: ${isMatch}`);
+
+  if (!isMatch) {
+    logger(`[vmasm] No match, continuing request`);
+    try {
+      await session.send('Fetch.continueRequest', {requestId});
+    } catch (error) {
+      logger(`[vmasm] Failed to continue request: ${error}`);
+    }
+    return;
+  }
+
+  logger(`[vmasm] ========================================`);
+  logger(`[vmasm] >>> SCRIPT INTERCEPTED <<<`);
+  logger(`[vmasm]   Original URL: ${url}`);
+  logger(`[vmasm]   Matched pattern: ${config.scriptPattern}`);
+  logger(`[vmasm]   Debug file: ${config.debugFilePath}`);
 
   try {
     // Read the debug file content
-    const debugFileContent = await fs.readFile(matchedConfig.debugFilePath, 'utf-8');
+    const debugFileContent = await fs.readFile(config.debugFilePath, 'utf-8');
     const base64Body = Buffer.from(debugFileContent).toString('base64');
 
-    logger(`[vmasm] Debug file size: ${debugFileContent.length} bytes`);
+    logger(`[vmasm]   Debug file size: ${debugFileContent.length} bytes`);
 
     await session.send('Fetch.fulfillRequest', {
       requestId,
@@ -109,9 +139,11 @@ async function handleVmasmRequestPaused(
       body: base64Body,
     });
 
-    logger(`[vmasm] ✅ Served debug file for ${url}`);
+    logger(`[vmasm] >>> SCRIPT REPLACED SUCCESSFULLY <<<`);
+    logger(`[vmasm] ========================================`);
   } catch (error) {
     logger(`[vmasm] Error serving debug file: ${error}`);
+    logger(`[vmasm] ========================================`);
     try {
       await session.send('Fetch.continueRequest', {requestId});
     } catch {
@@ -121,66 +153,104 @@ async function handleVmasmRequestPaused(
 }
 
 /**
- * Enable Fetch interception with current vmasm configs.
+ * Enable Fetch interception on a CDP session.
+ * Uses global config to determine URL pattern.
  */
-async function enableVmasmFetchInterception(session: CDPSession, page: Page): Promise<void> {
-  const configs = getPageInterceptionConfigs(page);
-
-  if (configs.size === 0) {
+async function enableFetchInterception(session: CDPSession): Promise<void> {
+  const config = globalInterceptionConfig;
+  if (!config) {
+    logger('[vmasm] No global config, skipping Fetch.enable');
     return;
   }
 
-  // Disable cache to ensure Fetch interception works even after page reload
+  // Build URL pattern with wildcards
+  const urlPattern = config.scriptPattern.includes('*')
+    ? config.scriptPattern
+    : `*${config.scriptPattern}*`;
+
+  logger(`[vmasm] Enabling Fetch interception`);
+  logger(`[vmasm]   URL pattern: ${urlPattern}`);
+
   try {
-    await session.send('Network.enable');
-    await session.send('Network.setCacheDisabled', {cacheDisabled: true});
-    logger('[vmasm] Network cache disabled');
-  } catch (err) {
-    logger(`[vmasm] Warning: Failed to disable cache: ${err}`);
-  }
-
-  const patterns: Array<{urlPattern: string; resourceType: 'Script'}> = [];
-  for (const config of configs.values()) {
-    patterns.push({
-      urlPattern: `*${config.scriptPattern}*`,
-      resourceType: 'Script' as const,
+    await session.send('Fetch.enable', {
+      patterns: [{
+        resourceType: 'Script',
+        urlPattern: urlPattern,
+      }],
     });
+    logger('[vmasm] Fetch.enable SUCCESS');
+  } catch (err) {
+    logger(`[vmasm] Fetch.enable FAILED: ${err}`);
   }
-
-  await session.send('Fetch.enable', {patterns});
-  logger(`[vmasm] Fetch enabled with ${patterns.length} URL pattern(s)`);
 }
 
 /**
- * Initialize Fetch interception for vmasm debug files.
+ * Set up complete page interception - like jsvmp-ir-extension's setupPageInterception
+ * This sets up ALL necessary CDP domains for a page.
  */
-async function initializeVmasmFetchInterception(page: Page): Promise<CDPSession> {
-  const session = await getCdpSession(page);
-
+async function setupPageInterception(page: Page): Promise<CDPSession> {
+  // Check if already initialized
   if (vmasmInitializedPages.has(page)) {
-    return session;
+    const existingSession = pageCdpSessions.get(page);
+    if (existingSession) {
+      return existingSession;
+    }
   }
+
+  logger(`[vmasm] Setting up page interception for: ${page.url() || 'about:blank'}`);
+
+  const session = await getCdpSession(page);
+  pageCdpSessions.set(page, session);
   vmasmInitializedPages.add(page);
 
-  // Listen for Fetch.requestPaused events
-  session.on('Fetch.requestPaused', (event: any) => {
-    handleVmasmRequestPaused(session, page, event);
-  });
+  // Step 1: Enable Network domain and disable cache
+  // This ensures Fetch interception works even after page reload
+  try {
+    await session.send('Network.enable');
+    await session.send('Network.setCacheDisabled', {cacheDisabled: true});
+    logger('[vmasm] Network.setCacheDisabled: cache DISABLED');
+  } catch (err) {
+    logger(`[vmasm] WARNING: Failed to disable cache: ${err}`);
+  }
 
-  // Get main frame ID
+  // Step 2: Enable Page domain for script injection and navigation events
+  try {
+    await session.send('Page.enable');
+    logger('[vmasm] Page.enable SUCCESS');
+  } catch (err) {
+    logger(`[vmasm] WARNING: Page.enable failed: ${err}`);
+  }
+
+  // Step 3: Enable Debugger domain - makes debugger statements work
+  try {
+    await session.send('Debugger.enable');
+    logger('[vmasm] Debugger.enable SUCCESS');
+  } catch (err) {
+    logger(`[vmasm] WARNING: Debugger.enable failed: ${err}`);
+  }
+
+  // Step 4: Set up Fetch.requestPaused handler
+  session.on('Fetch.requestPaused', (event: any) => {
+    handleVmasmRequestPaused(session, event);
+  });
+  logger('[vmasm] Fetch.requestPaused handler registered');
+
+  // Step 5: Enable Fetch interception if config exists
+  await enableFetchInterception(session);
+
+  // Step 6: Get main frame ID for navigation detection
   let mainFrameId: string | undefined;
   try {
     const frameTree = await session.send('Page.getFrameTree');
     mainFrameId = (frameTree as any).frameTree?.frame?.id;
+    logger(`[vmasm] Main frame ID: ${mainFrameId}`);
   } catch {
     // Ignore
   }
 
-  // Re-enable Fetch on navigation
+  // Step 7: Re-enable Fetch on navigation (critical for page refresh)
   session.on('Page.frameStartedLoading', async (params: any) => {
-    const configs = getPageInterceptionConfigs(page);
-    if (configs.size === 0) return;
-
+    // Only re-enable for main frame
     let isMainFrame = !mainFrameId || params.frameId === mainFrameId;
     if (!isMainFrame) {
       try {
@@ -195,25 +265,70 @@ async function initializeVmasmFetchInterception(page: Page): Promise<CDPSession>
       }
     }
 
-    if (isMainFrame) {
+    if (isMainFrame && globalInterceptionConfig) {
       logger('[vmasm] Main frame loading, re-enabling Fetch interception...');
       try {
-        await enableVmasmFetchInterception(session, page);
+        await enableFetchInterception(session);
       } catch (err) {
         logger(`[vmasm] Error re-enabling Fetch: ${err}`);
       }
     }
   });
 
-  // Enable Page domain for navigation events
-  try {
-    await session.send('Page.enable');
-  } catch {
-    // Ignore
-  }
+  // Step 8: Inject breakpoint initialization script
+  await injectBreakpointInitScript(session);
 
-  logger('[vmasm] Fetch interception initialized');
+  logger('[vmasm] Page interception setup complete');
   return session;
+}
+
+/**
+ * Inject breakpoint initialization script to page.
+ * This ensures window.__breakpoints is available.
+ */
+async function injectBreakpointInitScript(session: CDPSession): Promise<void> {
+  const vmasmContext = getVmasmContext();
+  const breakpoints = vmasmContext.listBreakpoints();
+  const addresses = breakpoints.map(bp => bp.address);
+
+  const initScript = `
+    // VMASM Debugger: Initialize breakpoint set
+    (function() {
+      if (typeof window !== 'undefined') {
+        window.__jsvmp_breakpoint_addrs = ${JSON.stringify(addresses)};
+        window.__breakpoints = new Set(window.__jsvmp_breakpoint_addrs);
+        console.log('[VMASM] Breakpoints initialized:', window.__breakpoints.size, 'addresses');
+      }
+    })();
+  `;
+
+  try {
+    // Add script to run on new documents
+    await session.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: initScript,
+    });
+    logger(`[vmasm] Breakpoint init script added (${addresses.length} addresses)`);
+
+    // Also execute immediately in current context
+    try {
+      await session.send('Runtime.evaluate', {
+        expression: initScript,
+      });
+      logger('[vmasm] Breakpoint init script executed in current context');
+    } catch (err) {
+      logger(`[vmasm] WARNING: Failed to execute in current context: ${err}`);
+    }
+  } catch (error) {
+    logger(`[vmasm] ERROR: Failed to inject breakpoint script: ${error}`);
+  }
+}
+
+/**
+ * Initialize VMASM interception for a page.
+ * This is the main entry point - call this before any vmasm operations.
+ */
+export async function initializeVmasmForPage(page: Page): Promise<CDPSession> {
+  return await setupPageInterception(page);
 }
 
 
@@ -341,14 +456,11 @@ After loading, you can:
     if (genResult.urlPattern && genResult.debugFilePath) {
       response.appendResponseLine('🔗 Configuring script interception...');
 
-      const interceptionConfig: InterceptionConfig = {
+      // Set global interception config - this is used by all pages
+      setGlobalInterceptionConfig({
         scriptPattern: genResult.urlPattern,
         debugFilePath: genResult.debugFilePath,
-      };
-
-      // Store config for this page
-      const configs = getPageInterceptionConfigs(page);
-      configs.set(loadResult.filePath, interceptionConfig);
+      });
 
       // Store in vmasm context as well
       vmasmContext.setInterceptionConfig(loadResult.filePath, {
@@ -357,9 +469,8 @@ After loading, you can:
         enabled: true,
       });
 
-      // Initialize and enable Fetch interception
-      const session = await initializeVmasmFetchInterception(page);
-      await enableVmasmFetchInterception(session, page);
+      // Initialize page interception (sets up all CDP domains)
+      await initializeVmasmForPage(page);
 
       response.appendResponseLine(`✅ Interception configured for: ${genResult.urlPattern}`);
       response.appendResponseLine('');
