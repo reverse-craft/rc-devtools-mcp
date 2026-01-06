@@ -126,7 +126,7 @@ async function enableVmasmFetchInterception(session: CDPSession, page: Page): Pr
   for (const config of configs.values()) {
     patterns.push({
       urlPattern: `*${config.scriptPattern}*`,
-      requestStage: 'Response' as const,
+      requestStage: 'Request' as const,
     });
   }
 
