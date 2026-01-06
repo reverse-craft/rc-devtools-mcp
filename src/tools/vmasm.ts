@@ -71,6 +71,8 @@ async function handleVmasmRequestPaused(
   const url = request.url;
   const configs = getPageInterceptionConfigs(page);
 
+  logger(`[vmasm] Fetch.requestPaused: ${url}`);
+
   // Find matching config by URL pattern
   let matchedConfig: InterceptionConfig | undefined;
   for (const config of configs.values()) {
@@ -81,6 +83,7 @@ async function handleVmasmRequestPaused(
   }
 
   if (!matchedConfig) {
+    logger(`[vmasm] No matching config, continuing request`);
     try {
       await session.send('Fetch.continueRequest', {requestId});
     } catch (error) {
@@ -89,10 +92,15 @@ async function handleVmasmRequestPaused(
     return;
   }
 
+  logger(`[vmasm] Matched pattern: ${matchedConfig.scriptPattern}`);
+  logger(`[vmasm] Debug file: ${matchedConfig.debugFilePath}`);
+
   try {
     // Read the debug file content
     const debugFileContent = await fs.readFile(matchedConfig.debugFilePath, 'utf-8');
     const base64Body = Buffer.from(debugFileContent).toString('base64');
+
+    logger(`[vmasm] Debug file size: ${debugFileContent.length} bytes`);
 
     await session.send('Fetch.fulfillRequest', {
       requestId,
@@ -122,11 +130,20 @@ async function enableVmasmFetchInterception(session: CDPSession, page: Page): Pr
     return;
   }
 
-  const patterns: Array<{urlPattern: string; requestStage: 'Request' | 'Response'}> = [];
+  // Disable cache to ensure Fetch interception works even after page reload
+  try {
+    await session.send('Network.enable');
+    await session.send('Network.setCacheDisabled', {cacheDisabled: true});
+    logger('[vmasm] Network cache disabled');
+  } catch (err) {
+    logger(`[vmasm] Warning: Failed to disable cache: ${err}`);
+  }
+
+  const patterns: Array<{urlPattern: string; resourceType: 'Script'}> = [];
   for (const config of configs.values()) {
     patterns.push({
       urlPattern: `*${config.scriptPattern}*`,
-      requestStage: 'Request' as const,
+      resourceType: 'Script' as const,
     });
   }
 
@@ -624,6 +641,30 @@ Uses register mappings from the loaded vmasm file to locate the correct variable
 // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 // ==========================================
 
+/**
+ * Parse an address that can be either a number or a hex string.
+ * Supports formats: 123, "123", "0x7b", "0X7B"
+ */
+function parseAddress(input: number | string): number | null {
+  if (typeof input === 'number') {
+    return Number.isInteger(input) && input >= 0 ? input : null;
+  }
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    // Check for hex format (0x or 0X prefix)
+    if (/^0[xX][0-9a-fA-F]+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 16);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+    // Check for decimal format
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+  }
+  return null;
+}
+
 export const setVmasmBreakpoint = defineTool({
   name: 'set_vmasm_breakpoint',
   description: `Set a breakpoint at a vmasm bytecode address.
@@ -633,24 +674,36 @@ The breakpoint will trigger when the virtual machine's instruction pointer (Virt
 **Note:** Requires a vmasm file to be loaded first using \`load_vmasm\`.
 
 The address must be a valid bytecode address from the loaded vmasm file.
-Use hex format (e.g., 0x0000) or decimal.`,
+Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 256).`,
   annotations: {
     category: ToolCategory.DEBUGGING,
     readOnlyHint: false,
   },
   schema: {
     address: zod
-      .number()
-      .int()
-      .nonnegative()
-      .describe('Bytecode address (e.g., 0 for 0x0000, 256 for 0x0100)'),
+      .union([
+        zod.number().int().nonnegative(),
+        zod.string().regex(/^(0[xX][0-9a-fA-F]+|\d+)$/, 'Must be a decimal number or hex string (e.g., "0x100")'),
+      ])
+      .describe('Bytecode address - supports hex string (e.g., "0x0000", "0x100") or decimal number (e.g., 0, 256)'),
     condition: zod
       .string()
       .optional()
       .describe('Optional JavaScript condition expression. Breakpoint only triggers when this evaluates to true.'),
   },
   handler: async (request, response, context) => {
-    const {address, condition} = request.params;
+    const {address: addressInput, condition} = request.params;
+
+    // Parse the address (supports both number and hex string)
+    const address = parseAddress(addressInput);
+    if (address === null) {
+      response.appendResponseLine(`❌ Invalid address format: ${addressInput}`);
+      response.appendResponseLine('');
+      response.appendResponseLine('Supported formats:');
+      response.appendResponseLine('   • Hex string: "0x0000", "0x100", "0xFF"');
+      response.appendResponseLine('   • Decimal number: 0, 256, 255');
+      return;
+    }
     const page = context.getSelectedPage();
     const vmasmContext = getVmasmContext();
 
