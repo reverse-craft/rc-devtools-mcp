@@ -241,3 +241,20 @@ export {
   type TransformVariableInfo,
   type TransformVariablesResult,
 } from './transform-evaluator.js';
+
+// AST Transform Utilities
+export {
+  IdentifierSubstitutor,
+  substituteIdentifiers,
+  type Substitution,
+  type TransformResult,
+  type RegisterMapping as AstRegisterMapping,
+} from './ast-transform.js';
+
+// Opcode Listing Provider
+export {
+  OpcodeListingProvider,
+  getFormattedOpcodeListing,
+  type ListingInstruction,
+  type InstructionListing,
+} from './opcode-listing-provider.js';

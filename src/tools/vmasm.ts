@@ -648,6 +648,10 @@ import {
   formatAllScopes,
   hasScopeVariables,
 } from '../utils/scope-fetcher.js';
+import {
+  OpcodeListingProvider,
+  getFormattedOpcodeListing,
+} from '../utils/opcode-listing-provider.js';
 import type {OpcodeTransform} from '../utils/vmasm-visitor.js';
 
 export const getVmState = defineTool({
@@ -656,8 +660,8 @@ export const getVmState = defineTool({
 
 Returns comprehensive debugging information including:
 - JSVMP Registers (ip, sp, stack, bytecode, storage)
-- JSVMP Transform variables (semantic meaning of current opcode)
-- Bytecode Context (surrounding instructions)
+- JSVMP Transform variables (semantic meaning of current opcode with AST-transformed expressions)
+- Opcode Listing (surrounding instructions with resolved constant values)
 - JSVMP Call Stack (virtual call frames)
 - Scope Chain (local, closure, global variables)
 
@@ -843,18 +847,22 @@ Uses register mappings from the loaded vmasm file to locate the correct variable
     }
 
     // ==========================================
-    // Section 3: Bytecode Context
-    // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
+    // Section 3: Opcode Listing
+    // Requirements: 1.1, 5.4
     // ==========================================
     if (typeof currentAddress === 'number') {
-      const bytecodeContext = vmasmContext.getBytecodeContext(currentAddress, contextLines);
-      if (bytecodeContext) {
-        response.appendResponseLine('📜 **Bytecode Context:**');
-        const contextDisplayLines = vmasmContext.formatBytecodeContextDisplay(bytecodeContext);
-        for (const line of contextDisplayLines) {
-          response.appendResponseLine(`   ${line}`);
+      try {
+        const opcodeListing = getFormattedOpcodeListing(vmasmContext, currentAddress, contextLines);
+        if (opcodeListing && opcodeListing.length > 0) {
+          response.appendResponseLine('📜 **Opcode Listing:**');
+          for (const line of opcodeListing) {
+            response.appendResponseLine(`   ${line}`);
+          }
+          response.appendResponseLine('');
         }
-        response.appendResponseLine('');
+      } catch (error) {
+        // Requirement 5.4: Handle errors gracefully (skip section on failure)
+        logger(`[get_vm_state] Failed to generate opcode listing: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -990,13 +998,9 @@ Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 
         zod.string().regex(/^(0[xX][0-9a-fA-F]+|\d+)$/, 'Must be a decimal number or hex string (e.g., "0x100")'),
       ])
       .describe('Bytecode address - supports hex string (e.g., "0x0000", "0x100") or decimal number (e.g., 0, 256)'),
-    condition: zod
-      .string()
-      .optional()
-      .describe('Optional JavaScript condition expression. Breakpoint only triggers when this evaluates to true.'),
   },
   handler: async (request, response, context) => {
-    const {address: addressInput, condition} = request.params;
+    const {address: addressInput} = request.params;
 
     // Parse the address (supports both number and hex string)
     const address = parseAddress(addressInput);
@@ -1020,7 +1024,7 @@ Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 
     }
 
     // Set breakpoint in vmasm context
-    const result = vmasmContext.setBreakpoint(address, condition);
+    const result = vmasmContext.setBreakpoint(address);
 
     if ('error' in result) {
       response.appendResponseLine(`❌ Failed to set breakpoint: ${result.error}`);
@@ -1064,10 +1068,6 @@ Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 
           response.appendResponseLine(`**Operands:** ${instruction.operands.join(', ')}`);
         }
         response.appendResponseLine(`**VMASM Line:** ${instruction.lineNumber}`);
-      }
-
-      if (condition) {
-        response.appendResponseLine(`**Condition:** ${condition}`);
       }
 
       response.appendResponseLine('');

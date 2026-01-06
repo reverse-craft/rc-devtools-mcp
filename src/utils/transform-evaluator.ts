@@ -10,7 +10,7 @@
  * Provides functionality to evaluate transform expressions from vmasm
  * @opcode_transform directives using CDP Debugger.evaluateOnCallFrame.
  *
- * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
+ * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 5.2, 5.3
  */
 
 import type {CDPSession} from '../third-party/index.js';
@@ -22,6 +22,8 @@ import type {
 } from './vmasm-visitor.js';
 import {resolveConstantReferences} from './constant-resolver.js';
 import {formatValue, isExpandable, getTypeName} from './vm-state-utils.js';
+import {substituteIdentifiers, type TransformResult} from './ast-transform.js';
+import {logger} from './logger.js';
 
 /**
  * Result of evaluating a single transform variable
@@ -33,6 +35,8 @@ export interface EvaluatedVariable {
   expression: string;
   /** Expression with K[n] references resolved */
   resolvedExpression: string;
+  /** Expression with register identifiers substituted (AST-transformed) */
+  transformedExpression: string;
   /** Evaluated value (formatted for display) */
   value: string;
   /** Type of the evaluated value */
@@ -43,6 +47,8 @@ export interface EvaluatedVariable {
   error?: string;
   /** Whether this is a post-execution expression */
   isPost?: boolean;
+  /** Whether AST transformation was applied */
+  wasTransformed: boolean;
 }
 
 /**
@@ -303,7 +309,7 @@ export class TransformVariableProvider {
  * @param registers - Register mapping for variable substitution
  * @returns Evaluated variable result
  *
- * Requirements: 2.2, 2.4
+ * Requirements: 2.1, 2.2, 2.4, 5.2, 5.3
  */
 async function evaluateSingleVariable(
   session: CDPSession,
@@ -314,18 +320,70 @@ async function evaluateSingleVariable(
 ): Promise<EvaluatedVariable> {
   const {name, expression, isPost} = variable;
 
-  // Resolve K[n] references in the expression
-  const resolveResult = resolveConstantReferences(expression, constants);
-  const resolvedExpression = resolveResult.resolved;
+  // Requirement 5.2, 5.3: Handle missing register mappings gracefully
+  // Check if registers object is valid
+  if (!registers || typeof registers !== 'object') {
+    logger(`Transform evaluation: Missing or invalid register mapping for variable "${name}". Using original expression.`);
+    return {
+      name,
+      expression,
+      resolvedExpression: expression,
+      transformedExpression: expression,
+      value: '<unavailable>',
+      type: 'error',
+      expandable: false,
+      error: 'Missing register mapping',
+      isPost,
+      wasTransformed: false,
+    };
+  }
 
-  // Substitute register names in the expression
-  const substitutedExpression = substituteRegisters(resolvedExpression, registers);
+  // Resolve K[n] references in the expression
+  // Requirement 5.3: Log warnings without interrupting output
+  let resolvedExpression = expression;
+  try {
+    const resolveResult = resolveConstantReferences(expression, constants);
+    resolvedExpression = resolveResult.resolved;
+    
+    // Log warning if there were invalid constant indices
+    if (resolveResult.invalidIndices.length > 0) {
+      logger(`Transform evaluation: Invalid constant indices [${resolveResult.invalidIndices.join(', ')}] in expression "${expression}" for variable "${name}".`);
+    }
+  } catch (resolveError) {
+    // Requirement 5.3: Log warning but continue with original expression
+    const errorMsg = resolveError instanceof Error ? resolveError.message : String(resolveError);
+    logger(`Transform evaluation: Failed to resolve constants in expression "${expression}" for variable "${name}": ${errorMsg}`);
+    resolvedExpression = expression;
+  }
+
+  // Use AST-based identifier substitution for register names
+  // Requirements 2.1, 2.2, 5.2: Parse expression using Babel AST parser and replace identifiers
+  // Missing mappings are handled gracefully by substituteIdentifiers
+  let transformedExpression = resolvedExpression;
+  let wasTransformed = false;
+  
+  try {
+    const transformResult = substituteIdentifiers(resolvedExpression, registers);
+    transformedExpression = transformResult.transformed;
+    wasTransformed = transformResult.wasTransformed;
+    
+    // Requirement 5.3: Log if AST transform had an error but still produced output
+    if (transformResult.error) {
+      logger(`Transform evaluation: AST transform warning for variable "${name}": ${transformResult.error}`);
+    }
+  } catch (transformError) {
+    // Requirement 5.3: Log warning but continue with resolved expression
+    const errorMsg = transformError instanceof Error ? transformError.message : String(transformError);
+    logger(`Transform evaluation: AST transform failed for variable "${name}": ${errorMsg}. Using resolved expression.`);
+    transformedExpression = resolvedExpression;
+    wasTransformed = false;
+  }
 
   try {
-    // Evaluate the expression in the call frame context
+    // Evaluate the transformed expression in the call frame context
     const result = await session.send('Debugger.evaluateOnCallFrame', {
       callFrameId,
-      expression: substitutedExpression,
+      expression: transformedExpression,
       returnByValue: true,
       silent: true,
       timeout: 5000, // 5 second timeout
@@ -338,15 +396,21 @@ async function evaluateSingleVariable(
 
     // Check for evaluation errors
     if (evalResult.exceptionDetails) {
+      // Requirement 5.3: Log warning without interrupting output
+      const errorText = evalResult.exceptionDetails.text || 'Evaluation failed';
+      logger(`Transform evaluation: Expression evaluation failed for variable "${name}": ${errorText}`);
+      
       return {
         name,
         expression,
         resolvedExpression,
+        transformedExpression,
         value: '<error>',
         type: 'error',
         expandable: false,
-        error: evalResult.exceptionDetails.text || 'Evaluation failed',
+        error: errorText,
         isPost,
+        wasTransformed,
       };
     }
 
@@ -359,41 +423,31 @@ async function evaluateSingleVariable(
       name,
       expression,
       resolvedExpression,
+      transformedExpression,
       value: formattedValue,
       type,
       expandable,
       isPost,
+      wasTransformed,
     };
   } catch (error) {
+    // Requirement 5.3: Log warning without interrupting output
     const errorMessage = error instanceof Error ? error.message : String(error);
+    logger(`Transform evaluation: CDP evaluation failed for variable "${name}": ${errorMessage}`);
+    
     return {
       name,
       expression,
       resolvedExpression,
+      transformedExpression,
       value: '<error>',
       type: 'error',
       expandable: false,
       error: errorMessage,
       isPost,
+      wasTransformed,
     };
   }
-}
-
-/**
- * Substitute register names in an expression with actual variable names
- *
- * @param expression - Expression with register placeholders
- * @param registers - Register mapping
- * @returns Expression with substituted variable names
- */
-function substituteRegisters(
-  expression: string,
-  registers: RegisterMapping
-): string {
-  // The expression may use short register names like 'v', 'p', 'a', etc.
-  // These should already match the register mapping from the vmasm file
-  // No substitution needed if the expression uses the correct variable names
-  return expression;
 }
 
 /**
@@ -418,19 +472,52 @@ export async function evaluateTransform(
   const evaluatedVariables: EvaluatedVariable[] = [];
   const errors: string[] = [];
 
-  // Evaluate pre-execution variables
-  for (const variable of transform.variables) {
-    const result = await evaluateSingleVariable(
-      session,
-      callFrameId,
-      variable,
-      constants,
-      registers
-    );
-    evaluatedVariables.push(result);
+  // Requirement 5.2, 5.3: Handle missing register mappings gracefully
+  if (!registers || typeof registers !== 'object') {
+    logger(`evaluateTransform: Missing or invalid register mapping for opcode ${transform.opcodeName}. Skipping variable evaluation.`);
+    return {
+      opcodeNumber: transform.opcodeNumber,
+      opcodeName: transform.opcodeName,
+      variables: [],
+      errors: ['Missing register mapping'],
+    };
+  }
 
-    if (result.error) {
-      errors.push(`${result.name}: ${result.error}`);
+  // Evaluate pre-execution variables
+  // Requirement 5.3: Continue processing even if individual variables fail
+  for (const variable of transform.variables) {
+    try {
+      const result = await evaluateSingleVariable(
+        session,
+        callFrameId,
+        variable,
+        constants,
+        registers
+      );
+      evaluatedVariables.push(result);
+
+      if (result.error) {
+        errors.push(`${result.name}: ${result.error}`);
+      }
+    } catch (error) {
+      // Requirement 5.3: Log warning and continue with other variables
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger(`evaluateTransform: Failed to evaluate variable "${variable.name}": ${errorMessage}`);
+      errors.push(`${variable.name}: ${errorMessage}`);
+      
+      // Add a placeholder result so the variable is still shown
+      evaluatedVariables.push({
+        name: variable.name,
+        expression: variable.expression,
+        resolvedExpression: variable.expression,
+        transformedExpression: variable.expression,
+        value: '<error>',
+        type: 'error',
+        expandable: false,
+        error: errorMessage,
+        isPost: variable.isPost,
+        wasTransformed: false,
+      });
     }
   }
 
@@ -452,7 +539,7 @@ export async function evaluateTransform(
  * @param registers - Register mapping
  * @returns Array of evaluated post-variables
  *
- * Requirements: 2.3
+ * Requirements: 2.3, 5.2, 5.3
  */
 export async function evaluatePostVariables(
   session: CDPSession,
@@ -463,15 +550,42 @@ export async function evaluatePostVariables(
 ): Promise<EvaluatedVariable[]> {
   const evaluatedVariables: EvaluatedVariable[] = [];
 
+  // Requirement 5.2, 5.3: Handle missing register mappings gracefully
+  if (!registers || typeof registers !== 'object') {
+    logger(`evaluatePostVariables: Missing or invalid register mapping for opcode ${transform.opcodeName}. Skipping post-variable evaluation.`);
+    return [];
+  }
+
+  // Requirement 5.3: Continue processing even if individual variables fail
   for (const variable of transform.postVariables) {
-    const result = await evaluateSingleVariable(
-      session,
-      callFrameId,
-      {...variable, isPost: true},
-      constants,
-      registers
-    );
-    evaluatedVariables.push(result);
+    try {
+      const result = await evaluateSingleVariable(
+        session,
+        callFrameId,
+        {...variable, isPost: true},
+        constants,
+        registers
+      );
+      evaluatedVariables.push(result);
+    } catch (error) {
+      // Requirement 5.3: Log warning and continue with other variables
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger(`evaluatePostVariables: Failed to evaluate post-variable "${variable.name}": ${errorMessage}`);
+      
+      // Add a placeholder result so the variable is still shown
+      evaluatedVariables.push({
+        name: variable.name,
+        expression: variable.expression,
+        resolvedExpression: variable.expression,
+        transformedExpression: variable.expression,
+        value: '<error>',
+        type: 'error',
+        expandable: false,
+        error: errorMessage,
+        isPost: true,
+        wasTransformed: false,
+      });
+    }
   }
 
   return evaluatedVariables;
@@ -569,16 +683,22 @@ export interface FormatVariableOptions {
   showExpression?: boolean;
   /** Whether to show type information (default: true for complex types) */
   showType?: boolean;
+  /** Whether to show the transformed expression (default: true) */
+  showTransformed?: boolean;
 }
 
 /**
  * Format a single evaluated variable for display
  *
+ * Requirements 3.1, 3.2, 3.3, 3.4:
+ * - Show variable name and evaluated value
+ * - Display transformed expression
+ * - Show original expression as comment
+ * - Indicate when transformation was applied
+ *
  * @param variable - Evaluated variable to format
  * @param options - Formatting options
  * @returns Formatted string for display
- *
- * Requirements: 2.5, 2.6
  */
 export function formatEvaluatedVariable(
   variable: EvaluatedVariable,
@@ -590,12 +710,14 @@ export function formatEvaluatedVariable(
     : options;
 
   const indent = opts.indent ?? '   ';
-  const showExpression = opts.showExpression ?? false;
+  const showExpression = opts.showExpression ?? true; // Default to true for enhanced display
   const showType = opts.showType ?? true;
+  const showTransformed = opts.showTransformed ?? true;
 
-  const {name, expression, resolvedExpression, value, type, expandable, error} = variable;
+  const {name, expression, transformedExpression, value, type, expandable, error, wasTransformed} = variable;
 
   // Build the display line
+  // Requirements 3.1: Show variable name and evaluated value
   let line = `${indent}${name} = ${value}`;
 
   // Add type info for non-primitive types
@@ -608,17 +730,30 @@ export function formatEvaluatedVariable(
     line += ' [+]';
   }
 
-  // Add expression as comment if requested
-  if (showExpression && expression) {
-    const exprToShow = resolvedExpression !== expression
-      ? `${expression} → ${resolvedExpression}`
-      : expression;
-    line += ` // ${exprToShow}`;
-  }
-
   // Add error indicator
   if (error) {
     line += ` // Error: ${error}`;
+  }
+
+  // Requirements 3.2, 3.3, 3.4: Show transformed expression and original as comment
+  if (showTransformed && showExpression && !error) {
+    // Show transformed expression on a new line with arrow indicator
+    if (wasTransformed) {
+      // Requirements 3.3: Indicate when transformation was applied
+      line += `\n${indent}   → ${transformedExpression}  // ${expression}`;
+    } else if (expression !== transformedExpression) {
+      // K[n] resolution happened but no AST transform
+      line += `\n${indent}   → ${transformedExpression}  // ${expression}`;
+    } else if (expression) {
+      // No transformation, just show the expression
+      line += `\n${indent}   → ${expression}`;
+    }
+  } else if (showExpression && expression && !error) {
+    // Legacy format: show expression as inline comment
+    const exprToShow = transformedExpression !== expression
+      ? `${expression} → ${transformedExpression}`
+      : expression;
+    line += ` // ${exprToShow}`;
   }
 
   return line;
@@ -627,11 +762,15 @@ export function formatEvaluatedVariable(
 /**
  * Format the transform section for display
  *
+ * Requirements 3.1, 3.2, 3.3, 3.4:
+ * - Show variable name and evaluated value
+ * - Display transformed expression
+ * - Show original expression as comment
+ * - Indicate when transformation was applied
+ *
  * @param result - Transform evaluation result
  * @param indent - Base indentation (default: 3 spaces)
  * @returns Array of formatted lines
- *
- * Requirements: 2.5, 2.6
  */
 export function formatTransformSection(
   result: TransformEvaluationResult,
@@ -647,7 +786,12 @@ export function formatTransformSection(
   if (result.current && result.current.variables.length > 0) {
     lines.push(`${indent}📝 Current: ${result.current.opcodeName}`);
     for (const variable of result.current.variables) {
-      lines.push(formatEvaluatedVariable(variable, indent + '   '));
+      lines.push(formatEvaluatedVariable(variable, {
+        indent: indent + '   ',
+        showExpression: true,
+        showType: true,
+        showTransformed: true,
+      }));
     }
   }
 
@@ -658,7 +802,12 @@ export function formatTransformSection(
     }
     lines.push(`${indent}📝 Previous Instruction: ${result.previous.opcodeName}`);
     for (const variable of result.previous.postVariables) {
-      lines.push(formatEvaluatedVariable(variable, indent + '   '));
+      lines.push(formatEvaluatedVariable(variable, {
+        indent: indent + '   ',
+        showExpression: true,
+        showType: true,
+        showTransformed: true,
+      }));
     }
   }
 

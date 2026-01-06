@@ -87,11 +87,13 @@ const evaluatedVariableArb: fc.Arbitrary<EvaluatedVariable> = fc.record({
   name: variableNameArb,
   expression: fc.string({minLength: 1, maxLength: 30}),
   resolvedExpression: fc.string({minLength: 1, maxLength: 30}),
+  transformedExpression: fc.string({minLength: 1, maxLength: 30}),
   value: fc.string({minLength: 1, maxLength: 50}),
   type: fc.constantFrom('string', 'number', 'boolean', 'object', 'array', 'null', 'undefined'),
   expandable: fc.boolean(),
   error: fc.option(fc.string({minLength: 1, maxLength: 30}), {nil: undefined}),
   isPost: fc.option(fc.boolean(), {nil: undefined}),
+  wasTransformed: fc.boolean(),
 });
 
 /**

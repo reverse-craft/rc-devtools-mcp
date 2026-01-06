@@ -41,12 +41,12 @@ export interface VmasmBreakpoint {
   address: number;
   /** CDP breakpoint ID (set after breakpoint is registered with CDP) */
   cdpBreakpointId?: string;
-  /** Optional condition expression */
-  condition?: string;
   /** Path to the vmasm file this breakpoint belongs to */
   vmasmPath: string;
   /** Hit count for this breakpoint */
   hitCount: number;
+  /** Optional condition expression for conditional breakpoints */
+  condition?: string;
 }
 
 /**
@@ -554,8 +554,7 @@ export class VmasmContext {
    * @returns Breakpoint info or error
    */
   setBreakpoint(
-    address: number,
-    condition?: string
+    address: number
   ): VmasmBreakpoint | {error: string} {
     const activeFile = this.session.activeFile;
     if (!activeFile) {
@@ -585,7 +584,6 @@ export class VmasmContext {
     const breakpoint: VmasmBreakpoint = {
       id: this.generateBreakpointId(),
       address,
-      condition,
       vmasmPath: activeFile,
       hitCount: 0,
     };

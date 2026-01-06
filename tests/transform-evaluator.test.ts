@@ -147,6 +147,7 @@ const evaluatedVariableArb: fc.Arbitrary<EvaluatedVariable> = fc.record({
   name: variableNameArb,
   expression: fc.string({minLength: 1, maxLength: 50}),
   resolvedExpression: fc.string({minLength: 1, maxLength: 50}),
+  transformedExpression: fc.string({minLength: 1, maxLength: 50}),
   value: fc.oneof(
     fc.string({minLength: 0, maxLength: 100}),
     fc.integer().map(String),
@@ -171,6 +172,7 @@ const evaluatedVariableArb: fc.Arbitrary<EvaluatedVariable> = fc.record({
   expandable: fc.boolean(),
   error: fc.option(fc.string({minLength: 1, maxLength: 50}), {nil: undefined}),
   isPost: fc.option(fc.boolean(), {nil: undefined}),
+  wasTransformed: fc.boolean(),
 });
 
 // ==========================================
@@ -634,9 +636,11 @@ describe('Transform Evaluator Unit Tests', () => {
         name: 'result',
         expression: 'v[p]',
         resolvedExpression: 'v[p]',
+        transformedExpression: 'v[p]',
         value: '"hello"',
         type: 'string',
         expandable: false,
+        wasTransformed: false,
       };
 
       const formatted = formatEvaluatedVariable(variable);
@@ -649,9 +653,11 @@ describe('Transform Evaluator Unit Tests', () => {
         name: 'arr',
         expression: 'v[p]',
         resolvedExpression: 'v[p]',
+        transformedExpression: 'v[p]',
         value: 'Array(5) [1, 2, ...]',
         type: 'array',
         expandable: true,
+        wasTransformed: false,
       };
 
       const formatted = formatEvaluatedVariable(variable);
@@ -664,10 +670,12 @@ describe('Transform Evaluator Unit Tests', () => {
         name: 'bad',
         expression: 'invalid.prop',
         resolvedExpression: 'invalid.prop',
+        transformedExpression: 'invalid.prop',
         value: '<error>',
         type: 'error',
         expandable: false,
         error: 'Cannot read property',
+        wasTransformed: false,
       };
 
       const formatted = formatEvaluatedVariable(variable);
@@ -680,9 +688,11 @@ describe('Transform Evaluator Unit Tests', () => {
         name: 'x',
         expression: 'K[0]',
         resolvedExpression: '"hello"',
+        transformedExpression: '"hello"',
         value: '"hello"',
         type: 'string',
         expandable: false,
+        wasTransformed: false,
       };
 
       const formatted = formatEvaluatedVariable(variable, {showExpression: true});
@@ -712,10 +722,12 @@ describe('Transform Evaluator Unit Tests', () => {
               name: 'postResult',
               expression: 'v[p]',
               resolvedExpression: 'v[p]',
+              transformedExpression: 'v[p]',
               value: '42',
               type: 'number',
               expandable: false,
               isPost: true,
+              wasTransformed: false,
             },
           ],
         },
@@ -740,10 +752,12 @@ describe('Transform Evaluator Unit Tests', () => {
           name: 'bad',
           expression: 'x',
           resolvedExpression: 'x',
+          transformedExpression: 'x',
           value: '<error>',
           type: 'error',
           expandable: false,
           error: 'failed',
+          wasTransformed: false,
         },
       ];
 
