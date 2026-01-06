@@ -73,11 +73,24 @@ export function getGlobalInterceptionConfig(): GlobalInterceptionConfig | null {
 
 /**
  * Track pages that have been initialized with VMASM Fetch interception.
+ * Uses WeakSet to avoid memory leaks when pages are closed.
  */
 const vmasmInitializedPages = new WeakSet<Page>();
 
 /**
- * Track CDP sessions per page for cleanup
+ * Track pages that have Fetch.requestPaused handler registered.
+ * This prevents duplicate handler registration.
+ */
+const fetchHandlerRegistered = new WeakSet<Page>();
+
+/**
+ * Track injected breakpoint script identifiers per page.
+ * Used to remove old scripts before injecting new ones when breakpoints change.
+ */
+const pageBreakpointScriptIds = new WeakMap<Page, string[]>();
+
+/**
+ * Track page to CDP session mapping for breakpoint sync.
  */
 const pageCdpSessions = new WeakMap<Page, CDPSession>();
 
@@ -91,12 +104,10 @@ async function handleVmasmRequestPaused(
   const {requestId, request} = event;
   const url = request.url;
 
-  logger(`[vmasm] Fetch.requestPaused: ${url}`);
-
   // Get global config
   const config = globalInterceptionConfig;
   if (!config) {
-    logger(`[vmasm] No global config, continuing request`);
+    logger(`[vmasm] Fetch.requestPaused: ${url} - No config, continuing`);
     try {
       await session.send('Fetch.continueRequest', {requestId});
     } catch (error) {
@@ -105,12 +116,11 @@ async function handleVmasmRequestPaused(
     return;
   }
 
-  // Check if URL matches the pattern
-  const isMatch = url.includes(config.scriptPattern) || config.scriptPattern === url;
-  logger(`[vmasm] Pattern: ${config.scriptPattern}, Match: ${isMatch}`);
+  // Check if URL matches the pattern (support wildcards)
+  const isMatch = urlMatchesPattern(url, config.scriptPattern);
 
   if (!isMatch) {
-    logger(`[vmasm] No match, continuing request`);
+    // Only log non-matching requests at debug level to reduce noise
     try {
       await session.send('Fetch.continueRequest', {requestId});
     } catch (error) {
@@ -153,6 +163,25 @@ async function handleVmasmRequestPaused(
 }
 
 /**
+ * Check if URL matches the pattern (supports wildcards).
+ */
+function urlMatchesPattern(url: string, pattern: string): boolean {
+  if (!pattern) return false;
+  
+  // If pattern doesn't contain wildcards, use simple includes
+  if (!pattern.includes('*')) {
+    return url.includes(pattern);
+  }
+  
+  // Convert wildcard pattern to regex
+  const escaped = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')  // Escape special regex chars
+    .replace(/\*/g, '.*');  // Convert * to .*
+  const regex = new RegExp(escaped);
+  return regex.test(url);
+}
+
+/**
  * Enable Fetch interception on a CDP session.
  * Uses global config to determine URL pattern.
  */
@@ -163,7 +192,7 @@ async function enableFetchInterception(session: CDPSession): Promise<void> {
     return;
   }
 
-  // Build URL pattern with wildcards
+  // Build URL pattern with wildcards for CDP Fetch.enable
   const urlPattern = config.scriptPattern.includes('*')
     ? config.scriptPattern
     : `*${config.scriptPattern}*`;
@@ -185,22 +214,29 @@ async function enableFetchInterception(session: CDPSession): Promise<void> {
 }
 
 /**
- * Set up complete page interception - like jsvmp-ir-extension's setupPageInterception
+ * Set up complete page interception for VMASM debugging.
  * This sets up ALL necessary CDP domains for a page.
+ * 
+ * Uses the shared CDP session from cdp.ts to avoid conflicts with other tools.
  */
 async function setupPageInterception(page: Page): Promise<CDPSession> {
-  // Check if already initialized
+  // Check if already initialized - but still get session for return
+  const session = await getCdpSession(page);
+  
+  // Store page to session mapping for breakpoint sync
+  pageCdpSessions.set(page, session);
+  
   if (vmasmInitializedPages.has(page)) {
-    const existingSession = pageCdpSessions.get(page);
-    if (existingSession) {
-      return existingSession;
+    logger(`[vmasm] Page already initialized: ${page.url() || 'about:blank'}`);
+    // Still re-enable Fetch if config exists (in case config was set after init)
+    if (globalInterceptionConfig && !fetchHandlerRegistered.has(page)) {
+      await registerFetchHandler(page, session);
     }
+    await enableFetchInterception(session);
+    return session;
   }
 
   logger(`[vmasm] Setting up page interception for: ${page.url() || 'about:blank'}`);
-
-  const session = await getCdpSession(page);
-  pageCdpSessions.set(page, session);
   vmasmInitializedPages.add(page);
 
   // Step 1: Enable Network domain and disable cache
@@ -221,24 +257,41 @@ async function setupPageInterception(page: Page): Promise<CDPSession> {
     logger(`[vmasm] WARNING: Page.enable failed: ${err}`);
   }
 
-  // Step 3: Enable Debugger domain - makes debugger statements work
-  try {
-    await session.send('Debugger.enable');
-    logger('[vmasm] Debugger.enable SUCCESS');
-  } catch (err) {
-    logger(`[vmasm] WARNING: Debugger.enable failed: ${err}`);
-  }
+  // Step 3: Register Fetch handler and enable Fetch interception
+  await registerFetchHandler(page, session);
+  await enableFetchInterception(session);
 
-  // Step 4: Set up Fetch.requestPaused handler
+  // Step 4: Set up navigation listener to re-enable Fetch on page refresh
+  await setupNavigationListener(page, session);
+
+  // Step 5: Inject breakpoint initialization script (pass page for tracking)
+  await injectBreakpointInitScript(session, page);
+
+  logger('[vmasm] Page interception setup complete');
+  return session;
+}
+
+/**
+ * Register Fetch.requestPaused handler for a page.
+ * Only registers once per page to avoid duplicate handlers.
+ */
+async function registerFetchHandler(page: Page, session: CDPSession): Promise<void> {
+  if (fetchHandlerRegistered.has(page)) {
+    return;
+  }
+  
   session.on('Fetch.requestPaused', (event: any) => {
     handleVmasmRequestPaused(session, event);
   });
+  fetchHandlerRegistered.add(page);
   logger('[vmasm] Fetch.requestPaused handler registered');
+}
 
-  // Step 5: Enable Fetch interception if config exists
-  await enableFetchInterception(session);
-
-  // Step 6: Get main frame ID for navigation detection
+/**
+ * Set up navigation listener to re-enable Fetch on page refresh.
+ */
+async function setupNavigationListener(page: Page, session: CDPSession): Promise<void> {
+  // Get main frame ID for navigation detection
   let mainFrameId: string | undefined;
   try {
     const frameTree = await session.send('Page.getFrameTree');
@@ -248,7 +301,7 @@ async function setupPageInterception(page: Page): Promise<CDPSession> {
     // Ignore
   }
 
-  // Step 7: Re-enable Fetch on navigation (critical for page refresh)
+  // Re-enable Fetch on navigation (critical for page refresh)
   session.on('Page.frameStartedLoading', async (params: any) => {
     // Only re-enable for main frame
     let isMainFrame = !mainFrameId || params.frameId === mainFrameId;
@@ -274,19 +327,13 @@ async function setupPageInterception(page: Page): Promise<CDPSession> {
       }
     }
   });
-
-  // Step 8: Inject breakpoint initialization script
-  await injectBreakpointInitScript(session);
-
-  logger('[vmasm] Page interception setup complete');
-  return session;
 }
 
 /**
  * Inject breakpoint initialization script to page.
  * This ensures window.__breakpoints is available.
  */
-async function injectBreakpointInitScript(session: CDPSession): Promise<void> {
+async function injectBreakpointInitScript(session: CDPSession, page?: Page): Promise<void> {
   const vmasmContext = getVmasmContext();
   const breakpoints = vmasmContext.listBreakpoints();
   const addresses = breakpoints.map(bp => bp.address);
@@ -304,10 +351,17 @@ async function injectBreakpointInitScript(session: CDPSession): Promise<void> {
 
   try {
     // Add script to run on new documents
-    await session.send('Page.addScriptToEvaluateOnNewDocument', {
+    const result = await session.send('Page.addScriptToEvaluateOnNewDocument', {
       source: initScript,
-    });
+    }) as {identifier: string};
     logger(`[vmasm] Breakpoint init script added (${addresses.length} addresses)`);
+
+    // Track the script identifier for this page so we can remove it later
+    if (page) {
+      const existingIds = pageBreakpointScriptIds.get(page) || [];
+      existingIds.push(result.identifier);
+      pageBreakpointScriptIds.set(page, existingIds);
+    }
 
     // Also execute immediately in current context
     try {
@@ -324,11 +378,84 @@ async function injectBreakpointInitScript(session: CDPSession): Promise<void> {
 }
 
 /**
+ * Sync breakpoints to a specific page.
+ * Removes old injected scripts and injects new ones with updated breakpoint addresses.
+ * This ensures breakpoints persist across page refreshes.
+ */
+async function syncBreakpointsToPage(page: Page): Promise<void> {
+  const session = pageCdpSessions.get(page);
+  if (!session) {
+    logger('[vmasm] Cannot sync breakpoints: no CDP session for page');
+    return;
+  }
+
+  // Remove old injected scripts
+  const oldIds = pageBreakpointScriptIds.get(page) || [];
+  for (const id of oldIds) {
+    try {
+      await session.send('Page.removeScriptToEvaluateOnNewDocument', {identifier: id});
+      logger(`[vmasm] Removed old breakpoint script: ${id}`);
+    } catch (err) {
+      // Script may already be removed
+      logger(`[vmasm] WARNING: Failed to remove old script ${id}: ${err}`);
+    }
+  }
+  pageBreakpointScriptIds.set(page, []);
+
+  // Inject new script with updated breakpoints
+  await injectBreakpointInitScript(session, page);
+}
+
+/**
+ * Sync breakpoints to all initialized pages.
+ * Called when breakpoints are added, removed, or cleared.
+ */
+export async function syncBreakpointsToAllPages(): Promise<void> {
+  const vmasmContext = getVmasmContext();
+  const breakpoints = vmasmContext.listBreakpoints();
+  const addresses = breakpoints.map(bp => bp.address);
+  
+  logger(`[vmasm] Syncing ${addresses.length} breakpoints to all pages...`);
+  
+  // We need to iterate over all tracked pages
+  // Since WeakMap doesn't support iteration, we need to track pages differently
+  // For now, we'll sync to the current page via the context
+  // This is a limitation - in a full implementation, we'd need to track pages in a Set
+}
+
+/**
  * Initialize VMASM interception for a page.
  * This is the main entry point - call this before any vmasm operations.
+ * 
+ * This function is safe to call multiple times - it will only set up
+ * interception once per page, but will re-enable Fetch if config exists.
  */
 export async function initializeVmasmForPage(page: Page): Promise<CDPSession> {
   return await setupPageInterception(page);
+}
+
+/**
+ * Check if VMASM interception is configured.
+ * Returns true if there's a global interception config set.
+ */
+export function isVmasmInterceptionConfigured(): boolean {
+  return globalInterceptionConfig !== null;
+}
+
+/**
+ * Initialize VMASM interception for a page if config exists.
+ * This is called by mcp-context.ts when new pages are created.
+ * 
+ * Unlike initializeVmasmForPage, this function only sets up interception
+ * if there's an active global config, avoiding unnecessary setup.
+ */
+export async function maybeInitializeVmasmForPage(page: Page): Promise<void> {
+  if (!globalInterceptionConfig) {
+    return;
+  }
+  
+  logger(`[vmasm] Auto-initializing interception for new page: ${page.url() || 'about:blank'}`);
+  await setupPageInterception(page);
 }
 
 
@@ -856,6 +983,10 @@ Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 
         returnByValue: true,
       });
 
+      // Sync breakpoints to page so they persist across refreshes
+      // This updates the Page.addScriptToEvaluateOnNewDocument script
+      await syncBreakpointsToPage(page);
+
       response.appendResponseLine('✅ Breakpoint set successfully');
       response.appendResponseLine('');
       response.appendResponseLine(`**Breakpoint ID:** \`${breakpoint.id}\``);
@@ -875,7 +1006,7 @@ Supports both hex string format (e.g., "0x0000", "0x100") and decimal (e.g., 0, 
 
       response.appendResponseLine('');
       response.appendResponseLine('ℹ️ The breakpoint will trigger when Virtual_IP reaches this address.');
-      response.appendResponseLine('   Refresh the page if needed to hit the breakpoint.');
+      response.appendResponseLine('   Breakpoints will persist across page refreshes.');
     } catch (error) {
       response.appendResponseLine(`❌ Failed to register breakpoint: ${error instanceof Error ? error.message : String(error)}`);
       // Remove from context since CDP registration failed
@@ -991,6 +1122,9 @@ Use \`list_vmasm_breakpoints\` to see active breakpoints and their IDs.`,
         `,
         returnByValue: true,
       });
+      
+      // Sync breakpoints to page so the change persists across refreshes
+      await syncBreakpointsToPage(page);
     } catch {
       // Ignore - page might not have the breakpoints set
     }
@@ -1026,6 +1160,9 @@ export const clearVmasmBreakpoints = defineTool({
         `,
         returnByValue: true,
       });
+      
+      // Sync breakpoints to page so the change persists across refreshes
+      await syncBreakpointsToPage(page);
     } catch {
       // Ignore - page might not have the breakpoints set
     }

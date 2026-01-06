@@ -33,6 +33,7 @@ import type {
 } from '../third-party/index.js';
 import {listPages} from '../tools/pages.js';
 import {takeSnapshot} from '../tools/snapshot.js';
+import {maybeInitializeVmasmForPage} from '../tools/vmasm.js';
 import {CLOSE_PAGE_ERROR} from '../tools/tool-definition.js';
 import type {Context, DevToolsData} from '../tools/tool-definition.js';
 import {disposeCdpSession, getNetworkInitiator, type NetworkInitiator} from '../utils/cdp.js';
@@ -169,6 +170,10 @@ export class McpContext implements Context {
       await initializeDebuggerForPage(page).catch(error => {
         this.logger('Error enabling debugger for existing page during init', error);
       });
+      // Initialize VMASM interception if configured
+      await maybeInitializeVmasmForPage(page).catch(error => {
+        this.logger('Error initializing vmasm for existing page during init', error);
+      });
     }
     
     await this.#networkCollector.init(pages);
@@ -185,6 +190,10 @@ export class McpContext implements Context {
       }
       await initializeDebuggerForPage(page).catch(error => {
         this.logger('Error enabling debugger for externally created page', error);
+      });
+      // Initialize VMASM interception if configured
+      await maybeInitializeVmasmForPage(page).catch(error => {
+        this.logger('Error initializing vmasm for externally created page', error);
       });
     } catch (err) {
       this.logger('Error handling targetcreated event', err);
@@ -322,6 +331,10 @@ export class McpContext implements Context {
         this.logger('Error enabling debugger for new page', error);
       });
     }
+    // Initialize VMASM interception if configured
+    await maybeInitializeVmasmForPage(page).catch(error => {
+      this.logger('Error initializing vmasm for new page', error);
+    });
     await this.createPagesSnapshot();
     this.selectPage(page);
     this.#networkCollector.addPage(page);
@@ -436,6 +449,10 @@ export class McpContext implements Context {
     });
     void initializeDebuggerForPage(newPage).catch(error => {
       this.logger('Error initializing debugger for page', error);
+    });
+    // Initialize VMASM interception if configured
+    void maybeInitializeVmasmForPage(newPage).catch(error => {
+      this.logger('Error initializing vmasm for selected page', error);
     });
   }
 
