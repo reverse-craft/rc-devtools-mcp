@@ -625,45 +625,41 @@ After loading, you can:
 
 // ==========================================
 // get_vm_state Tool
-// Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6
+// Requirements: 1.1, 2.1, 3.1, 4.1, 5.1, 5.2, 5.4, 5.5, 6.1
 // ==========================================
 
-/**
- * Format a value for display with truncation
- */
-function formatVmValue(value: any, maxLength = 100): string {
-  if (value === undefined) return 'undefined';
-  if (value === null) return 'null';
-
-  let str: string;
-  if (typeof value === 'string') {
-    str = JSON.stringify(value);
-  } else if (typeof value === 'object') {
-    try {
-      str = JSON.stringify(value);
-    } catch {
-      str = String(value);
-    }
-  } else {
-    str = String(value);
-  }
-
-  if (str.length > maxLength) {
-    return str.substring(0, maxLength) + '...';
-  }
-  return str;
-}
+import {
+  formatHexDecimal,
+  formatValue,
+  isExpandable,
+  getTypeName,
+} from '../utils/vm-state-utils.js';
+import {
+  evaluateTransformVariables,
+  formatTransformSection,
+  type TransformEvaluationResult,
+} from '../utils/transform-evaluator.js';
+import {
+  constructVirtualCallStack,
+  formatCallStackSection,
+} from '../utils/virtual-call-stack.js';
+import {
+  fetchScopeVariables,
+  formatAllScopes,
+  hasScopeVariables,
+} from '../utils/scope-fetcher.js';
+import type {OpcodeTransform} from '../utils/vmasm-visitor.js';
 
 export const getVmState = defineTool({
   name: 'get_vm_state',
   description: `Get the current virtual machine state when paused at a breakpoint.
 
-Returns:
-- Virtual IP (instruction pointer) and current opcode
-- Stack pointer and stack contents
-- Bytecode information
-- Constant pool contents
-- Scope chain information
+Returns comprehensive debugging information including:
+- JSVMP Registers (ip, sp, stack, bytecode, storage)
+- JSVMP Transform variables (semantic meaning of current opcode)
+- Bytecode Context (surrounding instructions)
+- JSVMP Call Stack (virtual call frames)
+- Scope Chain (local, closure, global variables)
 
 Uses register mappings from the loaded vmasm file to locate the correct variables.
 
@@ -687,9 +683,16 @@ Uses register mappings from the loaded vmasm file to locate the correct variable
       .default(10)
       .optional()
       .describe('Maximum constants to display (default: 10)'),
+    contextLines: zod
+      .number()
+      .int()
+      .positive()
+      .default(5)
+      .optional()
+      .describe('Number of bytecode instructions to show before/after current (default: 5)'),
   },
   handler: async (request, response, context) => {
-    const {maxStackItems = 20, maxConstants = 10} = request.params;
+    const {maxStackItems = 20, maxConstants = 10, contextLines = 5} = request.params;
     const page = context.getSelectedPage();
     const state = getDebuggerState(page);
     const vmasmContext = getVmasmContext();
@@ -723,7 +726,6 @@ Uses register mappings from the loaded vmasm file to locate the correct variable
     }
 
     const frame = callFrames[0];
-    const scopeChain = frame.scopeChain;
 
     // Helper to evaluate expression in the current frame
     async function evaluateInFrame(expression: string): Promise<any> {
@@ -740,135 +742,199 @@ Uses register mappings from the loaded vmasm file to locate the correct variable
       }
     }
 
-    response.appendResponseLine('🔍 **Virtual Machine State**');
-    response.appendResponseLine('');
+    // ==========================================
+    // Section 1: JSVMP Registers
+    // Requirements: 1.1, 1.2, 1.3, 1.4, 1.5
+    // ==========================================
+    response.appendResponseLine('🔧 **JSVMP Registers:**');
 
-    // Get Virtual IP
+    // Get Virtual IP and offset
     const virtualIP = await evaluateInFrame(registers.ip);
-    const virtualIPHex = typeof virtualIP === 'number'
-      ? `0x${virtualIP.toString(16).padStart(4, '0')}`
-      : 'N/A';
+    const offset = await evaluateInFrame('__jsvmp_offset') ?? 0;
+    const globalAddress = typeof virtualIP === 'number' && typeof offset === 'number'
+      ? virtualIP + offset
+      : undefined;
 
-    response.appendResponseLine('📍 **Execution Position:**');
-    response.appendResponseLine(`   Virtual IP: ${virtualIPHex} (${virtualIP ?? 'N/A'})`);
-
-    // Get current instruction from vmasm
+    // Format ip with raw and global values
     if (typeof virtualIP === 'number') {
-      const instruction = vmasmContext.getInstructionAtAddress(virtualIP);
-      if (instruction) {
-        response.appendResponseLine(`   Opcode: ${instruction.opcode}`);
-        if (instruction.operands.length > 0) {
-          response.appendResponseLine(`   Operands: ${instruction.operands.join(', ')}`);
-        }
-        response.appendResponseLine(`   VMASM Line: ${instruction.lineNumber}`);
-      }
+      const ipDisplay = globalAddress !== undefined
+        ? `${formatHexDecimal(virtualIP)} (global: ${formatHexDecimal(globalAddress)})`
+        : formatHexDecimal(virtualIP);
+      response.appendResponseLine(`   ip = ${ipDisplay}`);
+    } else {
+      response.appendResponseLine(`   ip = <unavailable>`);
     }
-    response.appendResponseLine('');
 
-    // Get Stack Pointer and Stack Contents
+    // Get Stack Pointer
     const stackPointer = await evaluateInFrame(registers.sp);
+    if (typeof stackPointer === 'number') {
+      response.appendResponseLine(`   sp = ${stackPointer}`);
+    } else {
+      response.appendResponseLine(`   sp = <unavailable>`);
+    }
+
+    // Get Stack array
     const stackContents = await evaluateInFrame(registers.stack);
-
-    response.appendResponseLine('📚 **Stack:**');
-    response.appendResponseLine(`   Stack Pointer: ${stackPointer ?? 'N/A'}`);
-
     if (Array.isArray(stackContents)) {
-      const displayCount = Math.min(stackContents.length, maxStackItems);
-      const sp = typeof stackPointer === 'number' ? stackPointer : stackContents.length - 1;
-
-      response.appendResponseLine(`   Stack Size: ${stackContents.length}`);
-      response.appendResponseLine('');
-
-      if (displayCount > 0) {
-        response.appendResponseLine('   Stack Contents (top to bottom):');
-        for (let i = sp; i >= 0 && i >= sp - displayCount + 1; i--) {
-          const marker = i === sp ? ' ← SP' : '';
-          const value = formatVmValue(stackContents[i]);
-          response.appendResponseLine(`      [${i}]: ${value}${marker}`);
-        }
-        if (sp > displayCount) {
-          response.appendResponseLine(`      ... ${sp - displayCount + 1} more items`);
-        }
-      } else {
-        response.appendResponseLine('   (empty)');
-      }
+      response.appendResponseLine(`   stack = Array(${stackContents.length}) [+]`);
     } else {
-      response.appendResponseLine('   Stack: N/A');
+      response.appendResponseLine(`   stack = <unavailable>`);
     }
-    response.appendResponseLine('');
 
-    // Get Bytecode Info
+    // Get Bytecode array
     const bytecode = await evaluateInFrame(registers.bc);
-    response.appendResponseLine('💾 **Bytecode:**');
     if (Array.isArray(bytecode)) {
-      response.appendResponseLine(`   Length: ${bytecode.length}`);
-      if (typeof virtualIP === 'number' && virtualIP < bytecode.length) {
-        const currentOpcode = bytecode[virtualIP];
-        response.appendResponseLine(`   Current Opcode Value: ${currentOpcode}`);
-      }
+      response.appendResponseLine(`   bytecode = Array(${bytecode.length}) [+]`);
     } else {
-      response.appendResponseLine('   Bytecode: N/A');
+      response.appendResponseLine(`   bytecode = <unavailable>`);
+    }
+
+    // Get Storage
+    const storage = await evaluateInFrame(registers.storage);
+    if (storage !== undefined) {
+      const storageDisplay = formatValue(storage, 50);
+      const expandable = isExpandable(storage) ? ' [+]' : '';
+      response.appendResponseLine(`   storage = ${storageDisplay}${expandable}`);
+    } else {
+      response.appendResponseLine(`   storage = <unavailable>`);
+    }
+
+    response.appendResponseLine('');
+
+    // ==========================================
+    // Section 2: JSVMP Transform
+    // Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
+    // ==========================================
+    const ast = vmasmContext.getActiveAST();
+    const currentAddress = globalAddress ?? virtualIP;
+
+    if (ast && typeof currentAddress === 'number' && Array.isArray(bytecode)) {
+      const opcodeTransforms = ast.opcodeTransforms;
+      const constants = ast.constants;
+
+      // Get the opcode number at the current address
+      const opcodeNumber = bytecode[currentAddress];
+      const currentTransform = opcodeNumber !== undefined
+        ? opcodeTransforms.get(opcodeNumber)
+        : undefined;
+
+      if (currentTransform && currentTransform.variables.length > 0) {
+        // Evaluate transform variables
+        const transformResult = await evaluateTransformVariables(
+          session,
+          frame.callFrameId,
+          currentAddress,
+          opcodeTransforms,
+          constants,
+          registers,
+          bytecode,
+          undefined // No previous transform tracking for now
+        );
+
+        if (transformResult.hasTransforms) {
+          response.appendResponseLine('📝 **JSVMP Transform:**');
+          const transformLines = formatTransformSection(transformResult, '   ');
+          for (const line of transformLines) {
+            response.appendResponseLine(line);
+          }
+          response.appendResponseLine('');
+        }
+      }
+    }
+
+    // ==========================================
+    // Section 3: Bytecode Context
+    // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
+    // ==========================================
+    if (typeof currentAddress === 'number') {
+      const bytecodeContext = vmasmContext.getBytecodeContext(currentAddress, contextLines);
+      if (bytecodeContext) {
+        response.appendResponseLine('📜 **Bytecode Context:**');
+        const contextDisplayLines = vmasmContext.formatBytecodeContextDisplay(bytecodeContext);
+        for (const line of contextDisplayLines) {
+          response.appendResponseLine(`   ${line}`);
+        }
+        response.appendResponseLine('');
+      }
+    }
+
+    // ==========================================
+    // Section 4: JSVMP Call Stack
+    // Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
+    // ==========================================
+    const virtualCallStack = await constructVirtualCallStack(
+      session,
+      callFrames,
+      vmasmContext
+    );
+
+    const callStackLines = formatCallStackSection(virtualCallStack, callFrames);
+    for (const line of callStackLines) {
+      response.appendResponseLine(line);
     }
     response.appendResponseLine('');
 
-    // Get Constants
-    const constants = await evaluateInFrame(registers.const);
-    response.appendResponseLine('📦 **Constant Pool:**');
-    if (Array.isArray(constants)) {
-      const displayCount = Math.min(constants.length, maxConstants);
-      response.appendResponseLine(`   Size: ${constants.length}`);
+    // ==========================================
+    // Section 5: Scope Chain
+    // Requirements: 4.1, 4.2, 4.3, 4.4
+    // ==========================================
+    try {
+      const scopeData = await fetchScopeVariables(session, frame.scopeChain);
+
+      if (hasScopeVariables(scopeData)) {
+        const scopeLines = formatAllScopes(scopeData, {indent: '   '});
+        for (const line of scopeLines) {
+          response.appendResponseLine(line);
+        }
+        response.appendResponseLine('');
+      }
+    } catch (error) {
+      // Requirement 4.4: Handle unavailable scopes gracefully
+      // Skip scope sections if fetching fails
+    }
+
+    // ==========================================
+    // Section 6: Stack Contents (detailed)
+    // ==========================================
+    if (Array.isArray(stackContents) && stackContents.length > 0) {
+      response.appendResponseLine('📚 **Stack Contents:**');
+      const sp = typeof stackPointer === 'number' ? stackPointer : stackContents.length - 1;
+      const displayCount = Math.min(stackContents.length, maxStackItems);
+
+      for (let i = sp; i >= 0 && i >= sp - displayCount + 1; i--) {
+        const marker = i === sp ? ' ← SP' : '';
+        const value = formatValue(stackContents[i], 80);
+        response.appendResponseLine(`   [${i}]: ${value}${marker}`);
+      }
+      if (sp > displayCount) {
+        response.appendResponseLine(`   ... ${sp - displayCount + 1} more items`);
+      }
       response.appendResponseLine('');
+    }
+
+    // ==========================================
+    // Section 7: Constant Pool (summary)
+    // ==========================================
+    const constants = await evaluateInFrame(registers.const);
+    if (Array.isArray(constants) && constants.length > 0) {
+      response.appendResponseLine('📦 **Constant Pool:**');
+      response.appendResponseLine(`   Size: ${constants.length}`);
+      const displayCount = Math.min(constants.length, maxConstants);
       for (let i = 0; i < displayCount; i++) {
-        const value = formatVmValue(constants[i]);
-        const type = typeof constants[i];
+        const value = formatValue(constants[i], 60);
+        const type = getTypeName(constants[i]);
         response.appendResponseLine(`   K[${i}]: (${type}) ${value}`);
       }
       if (constants.length > displayCount) {
         response.appendResponseLine(`   ... ${constants.length - displayCount} more constants`);
       }
-    } else {
-      response.appendResponseLine('   Constants: N/A');
-    }
-    response.appendResponseLine('');
-
-    // Get Scope Info
-    if (registers.scope) {
-      const scope = await evaluateInFrame(registers.scope);
-      response.appendResponseLine('🔗 **Scope:**');
-      if (scope !== undefined) {
-        response.appendResponseLine(`   Value: ${formatVmValue(scope, 200)}`);
-      } else {
-        response.appendResponseLine('   Scope: N/A');
-      }
       response.appendResponseLine('');
     }
 
-    // Get call stack from injected __jsvmp_call_stack
-    const callStack = await evaluateInFrame('window.__jsvmp_call_stack');
-    if (Array.isArray(callStack) && callStack.length > 0) {
-      response.appendResponseLine('📚 **JSVMP Call Stack:**');
-      response.appendResponseLine(`   Depth: ${callStack.length}`);
-      for (let i = callStack.length - 1; i >= 0 && i >= callStack.length - 5; i--) {
-        const frame = callStack[i];
-        const ipHex = typeof frame.ip === 'number'
-          ? `0x${(frame.ip + (frame.offset || 0)).toString(16).padStart(4, '0')}`
-          : 'N/A';
-        response.appendResponseLine(`   [${i}]: IP=${ipHex}, SP=${frame.sp ?? 'N/A'}`);
-      }
-      if (callStack.length > 5) {
-        response.appendResponseLine(`   ... ${callStack.length - 5} more frames`);
-      }
-      response.appendResponseLine('');
-    }
-
-    // Check for any errors from injection
-    const jsvmpError = await evaluateInFrame('window.__jsvmp_error');
-    if (jsvmpError) {
-      response.appendResponseLine('⚠️ **JSVMP Error:**');
-      response.appendResponseLine(`   ${formatVmValue(jsvmpError, 200)}`);
-      response.appendResponseLine('');
-    }
-
+    // ==========================================
+    // Actionable Hints
+    // Requirement: 5.5
+    // ==========================================
     response.appendResponseLine('ℹ️ Use `resume_execution` to continue or `step_over` to step.');
   },
 });

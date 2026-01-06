@@ -203,3 +203,41 @@ export {
   type InjectionResult,
   type VmasmMetadata,
 } from './debug-file-generator.js';
+
+// VM State Utilities
+export {
+  formatHexDecimal,
+  truncateString,
+  formatValue,
+  isExpandable,
+  getTypeName,
+} from './vm-state-utils.js';
+
+// Constant Resolver
+export {
+  resolveConstantReferences,
+  hasConstantReferences,
+  extractConstantIndices,
+  getConstantAtIndex,
+  formatConstantInline,
+  resolveSingleReference,
+  type ResolveResult,
+} from './constant-resolver.js';
+
+// Transform Evaluator
+export {
+  TransformVariableProvider,
+  evaluateTransform,
+  evaluatePostVariables,
+  evaluateTransformVariables,
+  formatEvaluatedVariable,
+  formatTransformSection,
+  formatTransformOutput,
+  summarizeVariables,
+  type EvaluatedVariable,
+  type EvaluatedTransform,
+  type TransformEvaluationResult,
+  type FormatVariableOptions,
+  type TransformVariableInfo,
+  type TransformVariablesResult,
+} from './transform-evaluator.js';

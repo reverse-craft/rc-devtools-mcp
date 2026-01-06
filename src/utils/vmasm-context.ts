@@ -19,7 +19,12 @@ import {
   type ParseError,
   type RegisterMapping,
   type InstructionEntry,
+  type ConstantEntry,
 } from './vmasm-visitor.js';
+import {
+  resolveConstantReferences,
+  formatConstantInline,
+} from './constant-resolver.js';
 
 // ==========================================
 // Interfaces
@@ -102,6 +107,44 @@ export interface VmasmSession {
   interceptionConfigs: Map<string, InterceptionConfig>;
   /** Counter for generating unique breakpoint IDs */
   breakpointIdCounter: number;
+}
+
+/**
+ * Represents a single instruction in the bytecode context display
+ * Requirements: 6.1, 6.4, 6.5, 6.6
+ */
+export interface ContextInstruction {
+  /** Bytecode address */
+  address: number;
+  /** Address in hex format (e.g., "0x0000") */
+  addressHex: string;
+  /** Opcode name */
+  opcode: string;
+  /** Operands with K[n] references resolved */
+  operands: string[];
+  /** Original operands before resolution */
+  rawOperands: string[];
+  /** VMASM line number */
+  vmasmLine: number;
+  /** Whether this is the current instruction */
+  isCurrent: boolean;
+}
+
+/**
+ * Result of getBytecodeContext
+ * Requirements: 6.1, 6.2, 6.3
+ */
+export interface BytecodeContext {
+  /** Instructions around the current address */
+  instructions: ContextInstruction[];
+  /** Index of the current instruction in the array */
+  currentIndex: number;
+  /** Start address of the context window */
+  startAddress: number;
+  /** End address of the context window */
+  endAddress: number;
+  /** Total number of instructions in the vmasm file */
+  totalInstructions: number;
 }
 
 // ==========================================
@@ -350,6 +393,144 @@ export class VmasmContext {
     const ast = this.getActiveAST();
     if (!ast) return [];
     return Array.from(ast.addrToLine.keys()).sort((a, b) => a - b);
+  }
+
+  // ==========================================
+  // Bytecode Context Provider
+  // Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
+  // ==========================================
+
+  /**
+   * Get bytecode context around the current address.
+   * Returns instructions before and after the current instruction for context.
+   *
+   * @param currentAddress - The current bytecode address (Virtual IP)
+   * @param contextLines - Number of instructions to show before and after (default: 5)
+   * @returns BytecodeContext with surrounding instructions, or undefined if not available
+   *
+   * Requirements: 6.1, 6.2, 6.3
+   */
+  getBytecodeContext(
+    currentAddress: number,
+    contextLines: number = 5
+  ): BytecodeContext | undefined {
+    const ast = this.getActiveAST();
+    if (!ast || ast.instructions.length === 0) {
+      return undefined;
+    }
+
+    // Find the index of the current instruction
+    const currentIndex = ast.instructions.findIndex(
+      instr => instr.addr === currentAddress
+    );
+
+    if (currentIndex === -1) {
+      // Address not found - try to find the closest instruction
+      return undefined;
+    }
+
+    // Calculate the range of instructions to include
+    const startIndex = Math.max(0, currentIndex - contextLines);
+    const endIndex = Math.min(
+      ast.instructions.length - 1,
+      currentIndex + contextLines
+    );
+
+    // Extract instructions in the context window
+    const contextInstructions: ContextInstruction[] = [];
+
+    for (let i = startIndex; i <= endIndex; i++) {
+      const instr = ast.instructions[i];
+      const contextInstr = this.formatContextInstruction(
+        instr,
+        ast.constants,
+        i === currentIndex
+      );
+      contextInstructions.push(contextInstr);
+    }
+
+    return {
+      instructions: contextInstructions,
+      currentIndex: currentIndex - startIndex,
+      startAddress: ast.instructions[startIndex].addr,
+      endAddress: ast.instructions[endIndex].addr,
+      totalInstructions: ast.instructions.length,
+    };
+  }
+
+  /**
+   * Format a single instruction for context display.
+   * Resolves K[n] references to their actual constant values.
+   *
+   * @param instr - The instruction entry from the AST
+   * @param constants - Array of constant entries for K[n] resolution
+   * @param isCurrent - Whether this is the current instruction
+   * @returns Formatted ContextInstruction
+   *
+   * Requirements: 6.4, 6.5, 6.6
+   */
+  private formatContextInstruction(
+    instr: InstructionEntry,
+    constants: ConstantEntry[],
+    isCurrent: boolean
+  ): ContextInstruction {
+    // Resolve K[n] references in operands
+    const resolvedOperands = instr.operands.map(operand => {
+      // Check if operand is a K[n] reference
+      const kRefMatch = operand.match(/^K\[(\d+)\]$/);
+      if (kRefMatch) {
+        const index = parseInt(kRefMatch[1], 10);
+        const constant = constants.find(c => c.index === index);
+        if (constant) {
+          // Format as K[n]=value for clarity
+          return `${operand}=${formatConstantInline(constant, 20)}`;
+        }
+      }
+      // For expressions containing K[n], resolve them inline
+      if (operand.includes('K[')) {
+        const result = resolveConstantReferences(operand, constants);
+        if (result.hasReferences && result.resolvedIndices.length > 0) {
+          return result.resolved;
+        }
+      }
+      return operand;
+    });
+
+    return {
+      address: instr.addr,
+      addressHex: `0x${instr.addr.toString(16).padStart(4, '0')}`,
+      opcode: instr.opcode,
+      operands: resolvedOperands,
+      rawOperands: [...instr.operands],
+      vmasmLine: instr.lineNumber,
+      isCurrent,
+    };
+  }
+
+  /**
+   * Format bytecode context for display output.
+   * Creates a formatted string representation of the bytecode context.
+   *
+   * @param context - The BytecodeContext to format
+   * @returns Array of formatted lines for display
+   *
+   * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6
+   */
+  formatBytecodeContextDisplay(context: BytecodeContext): string[] {
+    const lines: string[] = [];
+
+    for (const instr of context.instructions) {
+      // Build the instruction line
+      const marker = instr.isCurrent ? '>>>' : '   ';
+      const operandsStr =
+        instr.operands.length > 0 ? ' ' + instr.operands.join(', ') : '';
+
+      // Format: >>> 0x0000 : OPCODE operands  ; line N
+      const line = `${marker} ${instr.addressHex} : ${instr.opcode}${operandsStr}  ; line ${instr.vmasmLine}`;
+      lines.push(line);
+    }
+
+    return lines;
   }
 
   // ==========================================
