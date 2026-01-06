@@ -23,28 +23,30 @@ const EXPECTED_TOOLS = {
   input: ['click', 'fill', 'press_key'],
   
   // Navigation tools (Requirement 3.2)
+  // Note: close_page and clear_cookies were removed per vmasm-debugger-tools requirements
   navigation: [
-    'navigate_page', 'new_page', 'close_page', 
-    'list_pages', 'select_page', 'clear_cookies'
+    'navigate_page', 'new_page',
+    'list_pages', 'select_page'
   ],
   
   // Network tools (Requirement 3.3)
   network: [
     'list_network_requests', 'get_network_request', 
-    'search_network_requests', 'save_network_request', 
+    'save_network_request', 
     'save_static_resource'
   ],
   
   // Debugging tools (Requirement 3.4)
   // Note: search_functions was in the design but not implemented
+  // Note: step_into, step_out, analyze_call_graph, save_script_source were removed per vmasm-debugger-tools requirements
   // XHR breakpoint tools are additional debugging capabilities
   debugging: [
     'set_breakpoint', 'remove_breakpoint', 'list_breakpoints',
-    'clear_all_breakpoints', 'step_into', 'step_over', 'step_out',
+    'clear_all_breakpoints', 'step_over',
     'resume_execution', 'get_debugger_status', 'evaluate_script',
     'evaluate_on_call_frame', 'get_scope_variables', 'save_scope_variables',
-    'get_possible_breakpoints', 'analyze_call_graph',
-    'disable_debugger', 'save_script_source',
+    'get_possible_breakpoints',
+    'disable_debugger',
     'set_xhr_breakpoint', 'remove_xhr_breakpoint', 'list_xhr_breakpoints'
   ],
   
@@ -53,6 +55,16 @@ const EXPECTED_TOOLS = {
   
   // Screenshot/Snapshot tools (Requirement 3.6)
   screenshot: ['take_screenshot', 'take_snapshot'],
+  
+  // VMASM debugging tools (vmasm-debugger-tools Requirements 3.1-3.6, 4.1-4.6, 8.1-8.8)
+  vmasm: [
+    'load_vmasm',
+    'get_vm_state',
+    'set_vmasm_breakpoint',
+    'list_vmasm_breakpoints',
+    'remove_vmasm_breakpoint',
+    'clear_vmasm_breakpoints'
+  ],
 };
 
 // Flatten all expected tool names
@@ -137,6 +149,16 @@ describe('Tool Registration Completeness', () => {
       assert.ok(
         registeredToolNames.includes(toolName),
         `Screenshot/Snapshot tool "${toolName}" should be registered`
+      );
+    }
+  });
+
+  it('All vmasm debugging tools are registered (vmasm-debugger-tools Requirements)', () => {
+    const registeredToolNames = tools.map(t => t.name);
+    for (const toolName of EXPECTED_TOOLS.vmasm) {
+      assert.ok(
+        registeredToolNames.includes(toolName),
+        `VMASM tool "${toolName}" should be registered`
       );
     }
   });

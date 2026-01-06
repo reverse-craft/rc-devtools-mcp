@@ -17,7 +17,7 @@ import {
 import {SmartNavigator} from '../utils/smart-navigator.js';
 
 import {ToolCategory} from './categories.js';
-import {CLOSE_PAGE_ERROR, defineTool, timeoutSchema} from './tool-definition.js';
+import {defineTool, timeoutSchema} from './tool-definition.js';
 
 export const listPages = defineTool({
   name: 'list_pages',
@@ -60,34 +60,6 @@ export const selectPage = defineTool({
   },
 });
 
-
-export const closePage = defineTool({
-  name: 'close_page',
-  description: `Closes the page by its index. The last open page cannot be closed.`,
-  annotations: {
-    category: ToolCategory.NAVIGATION,
-    readOnlyHint: false,
-  },
-  schema: {
-    pageIdx: zod
-      .number()
-      .describe(
-        'The index of the page to close. Call list_pages to list pages.',
-      ),
-  },
-  handler: async (request, response, context) => {
-    try {
-      await context.closePage(request.params.pageIdx);
-    } catch (err) {
-      if (err.message === CLOSE_PAGE_ERROR) {
-        response.appendResponseLine(err.message);
-      } else {
-        throw err;
-      }
-    }
-    response.setIncludePages(true);
-  },
-});
 
 export const newPage = defineTool({
   name: 'new_page',
@@ -384,88 +356,5 @@ export const navigatePage = defineTool({
     });
 
     response.setIncludePages(true);
-  },
-});
-
-
-export const clearCookies = defineTool({
-  name: 'clear_cookies',
-  description: `Clear browser cookies for all sites or a specific domain.`,
-  annotations: {
-    category: ToolCategory.NAVIGATION,
-    readOnlyHint: false,
-  },
-  schema: {
-    url: zod
-      .string()
-      .optional()
-      .describe(
-        'Optional URL to clear cookies for a specific domain. If not provided, clears all cookies.',
-      ),
-  },
-  handler: async (request, response, context) => {
-    const page = context.getSelectedPage();
-    const browserContext = page.browserContext();
-
-    if (request.params.url) {
-      // Domain-specific clearing
-      let domain: string;
-      try {
-        const parsedUrl = new URL(request.params.url);
-        domain = parsedUrl.hostname;
-      } catch {
-        response.appendResponseLine(
-          `Failed to clear cookies: Invalid URL format "${request.params.url}".`,
-        );
-        return;
-      }
-
-      try {
-        const allCookies = await browserContext.cookies();
-        const domainCookies = allCookies.filter(cookie => {
-          // Match exact domain or subdomain (cookies with leading dot)
-          return (
-            cookie.domain === domain ||
-            cookie.domain === `.${domain}` ||
-            domain.endsWith(cookie.domain.replace(/^\./, ''))
-          );
-        });
-
-        if (domainCookies.length === 0) {
-          response.appendResponseLine(
-            `No cookies found for domain ${domain}.`,
-          );
-          return;
-        }
-
-        for (const cookie of domainCookies) {
-          await page.deleteCookie(cookie);
-        }
-
-        response.appendResponseLine(
-          `Cleared ${domainCookies.length} cookie(s) for domain ${domain}.`,
-        );
-      } catch (err) {
-        response.appendResponseLine(
-          `Failed to clear cookies: ${err.message}`,
-        );
-      }
-    } else {
-      // Clear all cookies
-      try {
-        const allCookies = await browserContext.cookies();
-        const cookieCount = allCookies.length;
-        for (const cookie of allCookies) {
-          await page.deleteCookie(cookie);
-        }
-        response.appendResponseLine(
-          `Cleared ${cookieCount} cookie(s) from browser.`,
-        );
-      } catch (err) {
-        response.appendResponseLine(
-          `Failed to clear cookies: ${err.message}`,
-        );
-      }
-    }
   },
 });

@@ -6,11 +6,8 @@
 
 /**
  * Script tools for rc-devtools-mcp.
- * Provides script evaluation and source saving capabilities.
+ * Provides script evaluation capabilities.
  */
-
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 import type {CDPSession} from '../third-party/index.js';
 import {zod} from '../third-party/index.js';
@@ -202,77 +199,6 @@ function formatExceptionDetails(exceptionDetails: {
   }
   return 'Unknown error';
 }
-
-export const saveScriptSource = defineTool({
-  name: 'save_script_source',
-  description:
-    'Save a script source to a local file. Use VM<id> pattern to match by scriptId, otherwise matches by URL substring.',
-  annotations: {
-    category: ToolCategory.DEBUGGING,
-    readOnlyHint: false,
-  },
-  schema: {
-    pattern: zod
-      .string()
-      .describe(
-        'Pattern to match script. If starts with "VM" (e.g., "VM123"), matches by scriptId. Otherwise matches by URL substring.',
-      ),
-    filePath: zod.string().describe('Path to save the script file.'),
-  },
-  handler: async (request, response, context) => {
-    const {pattern, filePath} = request.params;
-    const page = context.getSelectedPage();
-    const session = await getCdpSession(page);
-
-    try {
-      let scriptId: string | undefined;
-      let matchedUrl: string | undefined;
-
-      const vmMatch = pattern.match(/^VM(\d+)$/i);
-      if (vmMatch) {
-        scriptId = vmMatch[1];
-      } else {
-        const scriptCache = getScriptCache(session);
-        for (const [id, info] of scriptCache.entries()) {
-          if (info.url && info.url.includes(pattern)) {
-            scriptId = id;
-            matchedUrl = info.url;
-            break;
-          }
-        }
-      }
-
-      if (!scriptId) {
-        response.appendResponseLine(`Error: No script found matching pattern "${pattern}".`);
-        return;
-      }
-
-      const result = (await session.send('Debugger.getScriptSource', {
-        scriptId,
-      })) as {scriptSource: string; bytecode?: string};
-
-      const source = result.scriptSource;
-      if (!source) {
-        response.appendResponseLine(`Error: Script ${scriptId} has no source available.`);
-        return;
-      }
-
-      const fullPath = path.resolve(filePath);
-      await fs.mkdir(path.dirname(fullPath), {recursive: true});
-      await fs.writeFile(fullPath, source, 'utf-8');
-
-      response.appendResponseLine(`Saved script to ${fullPath}`);
-      if (matchedUrl) {
-        response.appendResponseLine(`Matched URL: ${matchedUrl}`);
-      }
-      response.appendResponseLine(`ScriptId: ${scriptId}, Size: ${source.length} bytes`);
-    } catch (error) {
-      response.appendResponseLine(
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  },
-});
 
 const DEFAULT_MAX_OUTPUT_CHARS = 10000;
 

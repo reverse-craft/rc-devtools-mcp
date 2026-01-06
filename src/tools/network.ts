@@ -132,12 +132,18 @@ const FILTERABLE_RESOURCE_TYPES = [
 
 export const listNetworkRequests = defineTool({
   name: 'list_network_requests',
-  description: `List all requests for the currently selected page since the last navigation.`,
+  description: `List all requests for the currently selected page since the last navigation. Supports optional keyword filtering.`,
   annotations: {
     category: ToolCategory.NETWORK,
     readOnlyHint: true,
   },
   schema: {
+    keyword: zod
+      .string()
+      .optional()
+      .describe(
+        'Filter requests by keyword in URL, request/response headers, or request/response bodies. When omitted or empty, returns all requests.',
+      ),
     pageSize: zod
       .number()
       .int()
@@ -169,162 +175,11 @@ export const listNetworkRequests = defineTool({
       ),
   },
   handler: async (request, response, context) => {
-    const data = await context.getDevToolsData();
-    response.attachDevToolsData(data);
-    const reqid = data?.cdpRequestId
-      ? context.resolveCdpRequestId(data.cdpRequestId)
-      : undefined;
-    response.setIncludeNetworkRequests(true, {
-      pageSize: request.params.pageSize,
-      pageIdx: request.params.pageIdx,
-      resourceTypes: request.params.resourceTypes,
-      includePreservedRequests: request.params.includePreservedRequests,
-      networkRequestIdInDevToolsUI: reqid,
-    });
-  },
-});
+    const {keyword, pageSize, pageIdx, resourceTypes, includePreservedRequests} = request.params;
 
-
-export const getNetworkRequest = defineTool({
-  name: 'get_network_request',
-  description: `Get a network request by reqid, or the currently selected request in DevTools if omitted.`,
-  annotations: {
-    category: ToolCategory.NETWORK,
-    readOnlyHint: true,
-  },
-  schema: {
-    reqid: zod
-      .number()
-      .optional()
-      .describe(
-        'The reqid of the network request. If omitted returns the currently selected request in the DevTools Network panel.',
-      ),
-  },
-  handler: async (request, response, context) => {
-    if (request.params.reqid) {
-      response.attachNetworkRequest(request.params.reqid);
-    } else {
-      const data = await context.getDevToolsData();
-      response.attachDevToolsData(data);
-      const reqid = data?.cdpRequestId
-        ? context.resolveCdpRequestId(data.cdpRequestId)
-        : undefined;
-      if (reqid) {
-        response.attachNetworkRequest(reqid);
-      } else {
-        response.appendResponseLine(
-          `Nothing is currently selected in the DevTools Network panel.`,
-        );
-      }
-    }
-  },
-});
-
-export const searchNetworkRequests = defineTool({
-  name: 'search_network_requests',
-  description: `Search network requests by URL pattern, HTTP method, status code, content type, or content body.`,
-  annotations: {
-    category: ToolCategory.NETWORK,
-    readOnlyHint: true,
-  },
-  schema: {
-    searchContent: zod
-      .string()
-      .optional()
-      .describe(
-        'Search term to find in URL, request/response headers, and request/response bodies. Returns matching snippets with highlighted matches. When provided, other filters still apply but output shows only snippets.',
-      ),
-    urlPattern: zod
-      .string()
-      .optional()
-      .describe(
-        'URL pattern to search for. Supports substring match or regex pattern (e.g., "api/users" or ".*\\.json$").',
-      ),
-    method: zod
-      .enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'])
-      .optional()
-      .describe('Filter by HTTP method.'),
-    statusCode: zod
-      .number()
-      .int()
-      .optional()
-      .describe('Filter by exact status code (e.g., 200, 404, 500).'),
-    statusCodeMin: zod
-      .number()
-      .int()
-      .optional()
-      .describe('Filter by minimum status code (inclusive).'),
-    statusCodeMax: zod
-      .number()
-      .int()
-      .optional()
-      .describe('Filter by maximum status code (inclusive).'),
-    contentType: zod
-      .string()
-      .optional()
-      .describe(
-        'Filter by response content type. Supports substring match (e.g., "json", "text/html").',
-      ),
-    resourceTypes: zod
-      .array(zod.enum(FILTERABLE_RESOURCE_TYPES))
-      .optional()
-      .describe(
-        'Filter requests to only return requests of the specified resource types.',
-      ),
-    includePreservedRequests: zod
-      .boolean()
-      .default(false)
-      .optional()
-      .describe(
-        'Set to true to search in preserved requests over the last 3 navigations.',
-      ),
-    pageSize: zod
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe(
-        'Maximum number of matching requests to return. When omitted, uses default page size.',
-      ),
-    pageIdx: zod
-      .number()
-      .int()
-      .min(0)
-      .optional()
-      .describe(
-        'Page number to return (0-based). When omitted, returns the first page.',
-      ),
-  },
-  handler: async (request, response, context) => {
-    const {
-      searchContent,
-      urlPattern,
-      method,
-      statusCode,
-      statusCodeMin,
-      statusCodeMax,
-      contentType,
-      resourceTypes,
-      includePreservedRequests,
-      pageSize,
-      pageIdx,
-    } = request.params;
-
-    const config = getConfig();
-
-    // Build a URL regex if pattern is provided
-    let urlRegex: RegExp | undefined;
-    if (urlPattern) {
-      try {
-        urlRegex = new RegExp(urlPattern, 'i');
-      } catch {
-        // If not a valid regex, use as substring match
-        urlRegex = new RegExp(urlPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      }
-    }
-
-    // If searchContent is provided, do content-based search with snippet output
-    if (searchContent) {
+    // If keyword is provided, perform keyword-based filtering with snippet output
+    if (keyword && keyword.trim()) {
+      const config = getConfig();
       let requests = context.getNetworkRequests(includePreservedRequests);
 
       // Apply resource type filtering if specified
@@ -334,41 +189,9 @@ export const searchNetworkRequests = defineTool({
       }
 
       const searchResults: SearchResult[] = [];
-      const searchTerm = searchContent;
+      const searchTerm = keyword.trim();
 
       for (const httpRequest of requests) {
-        // Apply URL pattern filter
-        if (urlRegex && !urlRegex.test(httpRequest.url())) {
-          continue;
-        }
-
-        // Apply HTTP method filter
-        if (method && httpRequest.method() !== method) {
-          continue;
-        }
-
-        // Apply status code filters
-        const httpResponse = httpRequest.response();
-        const responseStatus = httpResponse?.status();
-
-        if (statusCode !== undefined && responseStatus !== statusCode) {
-          continue;
-        }
-        if (statusCodeMin !== undefined && responseStatus !== undefined && responseStatus < statusCodeMin) {
-          continue;
-        }
-        if (statusCodeMax !== undefined && responseStatus !== undefined && responseStatus > statusCodeMax) {
-          continue;
-        }
-
-        // Apply content type filter
-        if (contentType && httpResponse) {
-          const respContentType = httpResponse.headers()['content-type'] ?? '';
-          if (!respContentType.toLowerCase().includes(contentType.toLowerCase())) {
-            continue;
-          }
-        }
-
         const matches: SearchMatch[] = [];
         const reqid = context.getNetworkRequestStableId(httpRequest);
 
@@ -401,7 +224,8 @@ export const searchNetworkRequests = defineTool({
           // Ignore request body errors
         }
 
-        // Search in response headers
+        // Search in response headers and body
+        const httpResponse = httpRequest.response();
         if (httpResponse) {
           const respHeaders = formatHeadersForSearch(httpResponse.headers());
           if (respHeaders.toLowerCase().includes(searchTerm.toLowerCase())) {
@@ -448,7 +272,7 @@ export const searchNetworkRequests = defineTool({
       // Apply pagination
       const paginationResult = paginate(searchResults, {pageSize, pageIdx});
 
-      response.appendResponseLine(`## Search results for "${searchContent}" (${searchResults.length} matches)`);
+      response.appendResponseLine(`## Network requests matching "${keyword}" (${searchResults.length} matches)`);
       
       if (paginationResult.totalPages > 1) {
         response.appendResponseLine(
@@ -476,56 +300,55 @@ export const searchNetworkRequests = defineTool({
       return;
     }
 
-    // Original behavior when searchContent is not provided
+    // Original behavior when keyword is not provided
+    const data = await context.getDevToolsData();
+    response.attachDevToolsData(data);
+    const reqid = data?.cdpRequestId
+      ? context.resolveCdpRequestId(data.cdpRequestId)
+      : undefined;
     response.setIncludeNetworkRequests(true, {
       pageSize,
       pageIdx,
       resourceTypes,
       includePreservedRequests,
-      filter: (httpRequest: NetworkHttpRequest) => {
-        // URL pattern filter
-        if (urlRegex && !urlRegex.test(httpRequest.url())) {
-          return false;
-        }
-
-        // HTTP method filter
-        if (method && httpRequest.method() !== method) {
-          return false;
-        }
-
-        // Status code filters
-        const httpResponse = httpRequest.response();
-        const responseStatus = httpResponse?.status();
-
-        if (statusCode !== undefined) {
-          if (responseStatus !== statusCode) {
-            return false;
-          }
-        }
-
-        if (statusCodeMin !== undefined && responseStatus !== undefined) {
-          if (responseStatus < statusCodeMin) {
-            return false;
-          }
-        }
-
-        if (statusCodeMax !== undefined && responseStatus !== undefined) {
-          if (responseStatus > statusCodeMax) {
-            return false;
-          }
-        }
-
-        // Content type filter
-        if (contentType && httpResponse) {
-          const respContentType = httpResponse.headers()['content-type'] ?? '';
-          if (!respContentType.toLowerCase().includes(contentType.toLowerCase())) {
-            return false;
-          }
-        }
-
-        return true;
-      },
+      networkRequestIdInDevToolsUI: reqid,
     });
+  },
+});
+
+
+export const getNetworkRequest = defineTool({
+  name: 'get_network_request',
+  description: `Get a network request by reqid, or the currently selected request in DevTools if omitted.`,
+  annotations: {
+    category: ToolCategory.NETWORK,
+    readOnlyHint: true,
+  },
+  schema: {
+    reqid: zod
+      .number()
+      .optional()
+      .describe(
+        'The reqid of the network request. If omitted returns the currently selected request in the DevTools Network panel.',
+      ),
+  },
+  handler: async (request, response, context) => {
+    if (request.params.reqid) {
+      response.attachNetworkRequest(request.params.reqid);
+    } else {
+      const data = await context.getDevToolsData();
+      response.attachDevToolsData(data);
+      const reqid = data?.cdpRequestId
+        ? context.resolveCdpRequestId(data.cdpRequestId)
+        : undefined;
+      if (reqid) {
+        response.attachNetworkRequest(reqid);
+      } else {
+        response.appendResponseLine(
+          `Nothing is currently selected in the DevTools Network panel.`,
+        );
+      }
+    }
   },
 });
 

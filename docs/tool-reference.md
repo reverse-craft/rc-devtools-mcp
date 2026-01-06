@@ -123,25 +123,6 @@ Get a network request by reqid, or the currently selected request in DevTools.
 |------|------|----------|-------------|
 | `reqid` | number | No | The reqid of the network request. If omitted, returns the currently selected request in DevTools |
 
-### search_network_requests
-
-Search network requests by URL pattern, HTTP method, status code, content type, or content body.
-
-**Parameters:**
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| `searchContent` | string | No | Search term to find in URL, headers, and bodies. Returns matching snippets |
-| `urlPattern` | string | No | URL pattern (substring or regex) |
-| `method` | enum | No | HTTP method: `GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS` |
-| `statusCode` | number | No | Filter by exact status code |
-| `statusCodeMin` | number | No | Filter by minimum status code |
-| `statusCodeMax` | number | No | Filter by maximum status code |
-| `contentType` | string | No | Filter by response content type (substring match) |
-| `resourceTypes` | array | No | Filter by resource types |
-| `includePreservedRequests` | boolean | No | Search in preserved requests |
-| `pageSize` | number | No | Maximum results per page |
-| `pageIdx` | number | No | Page number (0-based) |
-
 ### save_network_request
 
 Save a network request and response to a local file in raw HTTP format.

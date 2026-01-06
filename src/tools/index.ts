@@ -20,6 +20,7 @@ import * as persistentTools from './persistent.js';
 import * as screenshotTools from './screenshot.js';
 import * as scriptTools from './script.js';
 import * as snapshotTools from './snapshot.js';
+import * as vmasmTools from './vmasm.js';
 import type {ToolDefinition} from './tool-definition.js';
 
 const tools = [
@@ -34,6 +35,7 @@ const tools = [
   ...Object.values(screenshotTools),
   ...Object.values(scriptTools),
   ...Object.values(snapshotTools),
+  ...Object.values(vmasmTools),
 ].filter((item): item is ToolDefinition => 
   typeof item === 'object' && item !== null && 'schema' in item
 );

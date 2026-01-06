@@ -156,3 +156,50 @@ export {ScriptCacheRegistry} from './script-cache-registry.js';
 
 // Script parser
 export {parseScript} from './script-parser.js';
+
+// VMASM Parser
+export {
+  parseVmasm,
+  isParseError,
+  type VmasmAST,
+  type ParseError as VmasmParseError,
+  type ParseResult as VmasmParseResult,
+  type RegisterMapping,
+  type InstructionEntry,
+  type ConstantEntry,
+  type DispatcherInfo,
+  type GlobalBytecodeInfo,
+  type LoopEntryInfo,
+  type ScopeSlotEntry,
+  type OpcodeTransform,
+  type TransformVariable,
+} from './vmasm-visitor.js';
+
+// VMASM Context
+export {
+  VmasmContext,
+  getVmasmContext,
+  resetVmasmContext,
+  type VmasmBreakpoint,
+  type VmasmSession,
+  type InterceptionConfig,
+  type LoadResult,
+  type LoadError,
+} from './vmasm-context.js';
+
+// Debug File Generator
+export {
+  DebugFileGenerator,
+  getDebugFileGenerator,
+  resetDebugFileGenerator,
+  urlPatternToRegex,
+  matchUrlPattern,
+  normalizeUrlPattern,
+  type GenerationConfig,
+  type GenerationResult,
+  type DebugFileMapping,
+  type InterceptionConfig as DebugInterceptionConfig,
+  type InjectionConfig,
+  type InjectionResult,
+  type VmasmMetadata,
+} from './debug-file-generator.js';

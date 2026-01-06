@@ -163,19 +163,6 @@ List all network requests and show me the API calls
 **`get_network_request`** - Get details of a specific request
 - `reqid` (number, optional): Request ID (omit to use currently selected request in DevTools)
 
-**`search_network_requests`** - Search requests by URL, method, status, or content
-- `searchContent` (string, optional): Search term in URL, headers, and bodies (returns highlighted snippets)
-- `urlPattern` (string, optional): URL pattern (substring or regex, e.g., `"api/users"` or `".*\\.json$"`)
-- `method` (string, optional): HTTP method filter (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS`)
-- `statusCode` (number, optional): Exact status code filter
-- `statusCodeMin` (number, optional): Minimum status code (inclusive)
-- `statusCodeMax` (number, optional): Maximum status code (inclusive)
-- `contentType` (string, optional): Response content type filter (substring match, e.g., `"json"`)
-- `resourceTypes` (array, optional): Filter by resource types
-- `includePreservedRequests` (boolean, optional): Search in preserved requests (default: false)
-- `pageSize` (number, optional): Maximum results to return
-- `pageIdx` (number, optional): Page number (0-based)
-
 **`save_network_request`** - Save request/response to file in raw HTTP format
 - `reqid` (number, optional): Request ID (omit to use currently selected request)
 - `filePath` (string, required): File path to save HTTP transaction
