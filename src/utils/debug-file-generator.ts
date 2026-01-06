@@ -15,7 +15,6 @@ import type {
   RegisterMapping,
   DispatcherInfo,
   GlobalBytecodeInfo,
-  LoopEntryInfo,
 } from './vmasm-visitor.js';
 
 // ==========================================
@@ -82,19 +81,13 @@ export interface InjectionConfig {
     column: number; // 0-based column number
   };
 
-  /** Location from @loop_entry - where to insert offset calculation (inside dispatcher loop, before opcode read) */
-  functionEntryLocation: {
-    line: number; // 1-based line number
-    column: number; // 0-based column number
-  };
-
-  /** Location from @breakpoint - where to insert breakpoint check */
+  /** Location from @breakpoint - where to insert bytecode change check and debugger (before opcode read) */
   breakpointLocation: {
     line: number;
     column: number;
   };
 
-  /** Location from @dispatcher - where to insert breakpoint check (before dispatcher) */
+  /** Location from @dispatcher - where to insert offset function and initial offset calculation */
   dispatcherLocation: {
     line: number;
     column: number;
@@ -104,7 +97,7 @@ export interface InjectionConfig {
   registers: {
     ip: string; // Instruction pointer register (e.g., 'a')
     bc: string; // Local bytecode register (e.g., 'o')
-    sp?: string; // Stack pointer register (optional, e.g., 's')
+    sp?: string; // Stack pointer register (optional, not used in current implementation)
   };
 
   /** Global bytecode variable name from @global_bytecode (e.g., 'Z' or 'r.d') */
@@ -162,7 +155,6 @@ export interface VmasmMetadata {
   registers: RegisterMapping;
   dispatcher?: DispatcherInfo;
   globalBytecode?: GlobalBytecodeInfo;
-  loopEntry?: LoopEntryInfo;
 }
 
 
@@ -403,7 +395,7 @@ export class DebugFileGenerator {
 
   /**
    * Build InjectionConfig from vmasm metadata
-   * Extracts @loop_entry, @breakpoint, @dispatcher, @global_bytecode, @reg information
+   * Extracts @breakpoint, @dispatcher, @global_bytecode, @reg information
    * Returns null with detailed error logging if required directives are missing
    */
   buildInjectionConfig(
@@ -412,11 +404,6 @@ export class DebugFileGenerator {
   ): InjectionConfig | null {
     // Collect all missing directives for comprehensive error reporting
     const missingDirectives: string[] = [];
-
-    // Check @loop_entry
-    if (!metadata.loopEntry) {
-      missingDirectives.push('@loop_entry');
-    }
 
     // Check @dispatcher location
     if (!metadata.dispatcher?.location) {
@@ -456,10 +443,6 @@ export class DebugFileGenerator {
             column: metadata.globalBytecode!.location.column,
           }
         : undefined,
-      functionEntryLocation: {
-        line: metadata.loopEntry!.location.line,
-        column: metadata.loopEntry!.location.column,
-      },
       breakpointLocation: {
         line: metadata.dispatcher!.breakpoint!.line,
         column: metadata.dispatcher!.breakpoint!.column,
@@ -484,6 +467,11 @@ export class DebugFileGenerator {
   /**
    * Perform breakpoint injection using string-based manipulation
    * Inserts code at precise line/column locations
+   *
+   * Injection points:
+   * 1. @global_bytecode: window.__global_bytecode assignment
+   * 2. @dispatcher: __calcOffset function + initial offset + __prev_bc
+   * 3. @breakpoint: bytecode change check + debugger breakpoint check
    */
   inject(config: InjectionConfig): InjectionResult {
     try {
@@ -499,6 +487,8 @@ export class DebugFileGenerator {
         type: 'before' | 'after';
       }> = [];
 
+      const patternType = config.patternType || '1d_slice';
+
       // Step 1: Global bytecode assignment (insert after the location)
       if (config.globalBytecodeLocation) {
         const globalBytecodeCode = this.createGlobalBytecodeAssignment(
@@ -513,69 +503,36 @@ export class DebugFileGenerator {
         });
       }
 
-      // Step 2: Call stack initialization (insert before the loop at functionEntryLocation)
-      const callStackInitCode = this.createCallStackInit();
-      insertions.push({
-        line: config.functionEntryLocation.line,
-        column: config.functionEntryLocation.column,
-        code: callStackInitCode,
-        type: 'before',
-      });
-
-      // Step 3: Offset calculation (insert before the loop at functionEntryLocation)
-      const patternType = config.patternType || '1d_slice';
-      const offsetCalcCode =
+      // Step 2: Offset function definition (insert before dispatcher location)
+      const offsetFunctionCode =
         patternType === '2d_array'
-          ? this.createOffsetCalculation2D(config.localBytecodeVar || config.registers.bc)
-          : this.createOffsetCalculation(config.registers.bc);
-      insertions.push({
-        line: config.functionEntryLocation.line,
-        column: config.functionEntryLocation.column,
-        code: offsetCalcCode,
-        type: 'before',
-      });
-
-      // Step 4: Initial frame push (insert before the loop at functionEntryLocation)
-      const initialFramePushCode = this.createInitialFramePush(
-        config.registers.bc,
-        config.registers.sp
-      );
-      insertions.push({
-        line: config.functionEntryLocation.line,
-        column: config.functionEntryLocation.column,
-        code: initialFramePushCode,
-        type: 'before',
-      });
-
-      // Step 5: Frame update (insert before breakpoint location)
-      const frameUpdateCode = this.createFrameUpdate(config.registers.ip, config.registers.sp);
-      insertions.push({
-        line: config.breakpointLocation.line,
-        column: config.breakpointLocation.column,
-        code: frameUpdateCode,
-        type: 'before',
-      });
-
-      // Step 6: Bytecode change check (insert before breakpoint location)
-      const bytecodeChangeCheckCode = this.createBytecodeChangeCheck(
-        config.registers.bc,
-        config.registers.ip,
-        config.registers.sp,
-        patternType
-      );
-      insertions.push({
-        line: config.breakpointLocation.line,
-        column: config.breakpointLocation.column,
-        code: bytecodeChangeCheckCode,
-        type: 'before',
-      });
-
-      // Step 7: Breakpoint check (insert before dispatcher location)
-      const breakpointCheckCode = this.createBreakpointCheck(config.registers.ip);
+          ? this.createOffsetFunction2D()
+          : this.createOffsetFunction1D();
       insertions.push({
         line: config.dispatcherLocation.line,
         column: config.dispatcherLocation.column,
-        code: breakpointCheckCode,
+        code: offsetFunctionCode,
+        type: 'before',
+      });
+
+      // Step 3: Initial offset calculation and __prev_bc (insert before dispatcher location)
+      const initialOffsetCode = this.createInitialOffsetCalc(config.registers.bc);
+      insertions.push({
+        line: config.dispatcherLocation.line,
+        column: config.dispatcherLocation.column,
+        code: initialOffsetCode,
+        type: 'before',
+      });
+
+      // Step 4: Bytecode change check and breakpoint check (insert before breakpoint location)
+      const bytecodeChangeAndBreakpointCode = this.createBytecodeChangeAndBreakpointCheck(
+        config.registers.ip,
+        config.registers.bc
+      );
+      insertions.push({
+        line: config.breakpointLocation.line,
+        column: config.breakpointLocation.column,
+        code: bytecodeChangeAndBreakpointCode,
         type: 'before',
       });
 
@@ -645,78 +602,38 @@ export class DebugFileGenerator {
   }
 
   /**
-   * Generate call stack initialization code
+   * Generate offset calculation function for 1D slice pattern
+   * Creates a reusable __calcOffset function
    */
-  private createCallStackInit(): string {
-    return 'var __jsvmp_call_stack=[];';
+  private createOffsetFunction1D(): string {
+    return `function __calcOffset(bc){try{var gb=window.__global_bytecode;if(!gb)return 0;var MATCH_LEN=10;var pattern=bc.slice(0,MATCH_LEN);for(var i=0;i<=gb.length-MATCH_LEN;i++){if(pattern.every(function(v,j){return v===gb[i+j]}))return i}return 0}catch(e){window.__jsvmp_error=e;return 0}}`;
   }
 
   /**
-   * Generate offset calculation code for 1D slice pattern
+   * Generate offset calculation function for 2D array pattern
+   * Creates a reusable __calcOffset function
    */
-  private createOffsetCalculation(bcRegister: string): string {
-    return `var __jsvmp_offset=(function(){try{var gb=window.__global_bytecode;if(!gb)return 0;var MATCH_LEN=10;var pattern=${bcRegister}.slice(0,MATCH_LEN);for(var i=0;i<=gb.length-MATCH_LEN;i++){if(pattern.every(function(v,j){return v===gb[i+j]}))return i}return 0}catch(e){window.__jsvmp_error=e;return 0}})();`;
+  private createOffsetFunction2D(): string {
+    return `function __calcOffset(bc){try{var gb=window.__global_bytecode;if(!gb||!Array.isArray(gb))return 0;var local=bc;if(!local||!local.length)return 0;var MATCH_LEN=Math.min(10,local.length);var offset=0;for(var i=0;i<gb.length;i++){var sub=gb[i];if(!sub)continue;if(sub.length>=MATCH_LEN&&local.slice(0,MATCH_LEN).every(function(v,j){return v===sub[j]}))return offset;offset+=sub.length}return 0}catch(e){window.__jsvmp_error=e;return 0}}`;
   }
 
   /**
-   * Generate offset calculation code for 2D array pattern
+   * Generate initial offset calculation and __prev_bc initialization
+   * Inserted before @dispatcher
    */
-  private createOffsetCalculation2D(localBytecodeVar: string): string {
-    return `var __jsvmp_offset=(function(){try{var gb=window.__global_bytecode;if(!gb||!Array.isArray(gb))return 0;var local=${localBytecodeVar};if(!local||!local.length)return 0;var MATCH_LEN=Math.min(10,local.length);var offset=0;for(var i=0;i<gb.length;i++){var sub=gb[i];if(!sub)continue;if(sub.length>=MATCH_LEN&&local.slice(0,MATCH_LEN).every(function(v,j){return v===sub[j]}))return offset;offset+=sub.length}return 0}catch(e){window.__jsvmp_error=e;return 0}})();`;
+  private createInitialOffsetCalc(bcRegister: string): string {
+    return `var __jsvmp_offset=__calcOffset(${bcRegister});var __prev_bc=${bcRegister};`;
   }
 
   /**
-   * Generate initial frame push code
+   * Generate bytecode change check and breakpoint check code
+   * Inserted before @breakpoint (in each dispatch loop iteration)
    */
-  private createInitialFramePush(bcRegister: string, spRegister?: string): string {
-    const spPart = spRegister ? `,sp:${spRegister}` : '';
-    return `try{__jsvmp_call_stack.push({bc:${bcRegister},ip:0,offset:__jsvmp_offset${spPart}});window.__jsvmp_call_stack=__jsvmp_call_stack}catch(e){window.__jsvmp_error=e}`;
-  }
-
-  /**
-   * Generate frame update code
-   */
-  private createFrameUpdate(ipRegister: string, spRegister?: string): string {
-    const spUpdate = spRegister ? `__f.sp=${spRegister};` : '';
-    return `try{var __f=__jsvmp_call_stack[__jsvmp_call_stack.length-1];if(__f){__f.ip=${ipRegister};${spUpdate}}}catch(e){window.__jsvmp_error=e}`;
-  }
-
-  /**
-   * Generate bytecode change check code
-   */
-  private createBytecodeChangeCheck(
-    bcRegister: string,
+  private createBytecodeChangeAndBreakpointCheck(
     ipRegister: string,
-    spRegister: string | undefined,
-    patternType: '2d_array' | '1d_slice'
+    bcRegister: string
   ): string {
-    const offsetRecalc =
-      patternType === '2d_array'
-        ? this.createOffsetRecalculation2D(bcRegister)
-        : this.createOffsetRecalculation(bcRegister);
-    const spPart = spRegister ? `,sp:${spRegister}` : '';
-    return `try{var __f=__jsvmp_call_stack[__jsvmp_call_stack.length-1];if(__f&&${bcRegister}!==__f.bc){var __new_offset=${offsetRecalc};__jsvmp_call_stack.push({bc:${bcRegister},ip:${ipRegister},offset:__new_offset${spPart}});__jsvmp_offset=__new_offset;window.__jsvmp_call_stack=__jsvmp_call_stack}}catch(e){window.__jsvmp_error=e}`;
-  }
-
-  /**
-   * Generate offset recalculation IIFE for 1D slice pattern
-   */
-  private createOffsetRecalculation(bcRegister: string): string {
-    return `(function(){var gb=window.__global_bytecode;if(!gb)return 0;var MATCH_LEN=10;var pattern=${bcRegister}.slice(0,MATCH_LEN);for(var i=0;i<=gb.length-MATCH_LEN;i++){if(pattern.every(function(v,j){return v===gb[i+j]}))return i}return 0})()`;
-  }
-
-  /**
-   * Generate offset recalculation IIFE for 2D array pattern
-   */
-  private createOffsetRecalculation2D(bcRegister: string): string {
-    return `(function(){var gb=window.__global_bytecode;if(!gb||!Array.isArray(gb))return 0;var local=${bcRegister};if(!local||!local.length)return 0;var MATCH_LEN=Math.min(10,local.length);var offset=0;for(var i=0;i<gb.length;i++){var sub=gb[i];if(!sub)continue;if(sub.length>=MATCH_LEN&&local.slice(0,MATCH_LEN).every(function(v,j){return v===sub[j]}))return offset;offset+=sub.length}return 0})()`;
-  }
-
-  /**
-   * Generate breakpoint check code
-   */
-  private createBreakpointCheck(ipRegister: string): string {
-    return `if(window.__breakpoints&&window.__breakpoints.has(${ipRegister}+__jsvmp_offset))debugger;`;
+    return `if(${bcRegister}!==__prev_bc){__jsvmp_offset=__calcOffset(${bcRegister});__prev_bc=${bcRegister}}if(window.__breakpoints&&window.__breakpoints.has(${ipRegister}+__jsvmp_offset))debugger;`;
   }
 
 
@@ -819,13 +736,10 @@ export class DebugFileGenerator {
     lines.push('');
     lines.push('Required directives for breakpoint injection:');
     lines.push(
-      '  @dispatcher line=N, column=M              - Where to insert breakpoint check (before dispatcher)'
+      '  @dispatcher line=N, column=M              - Where to insert offset function and initial offset calculation'
     );
     lines.push(
-      '  @loop_entry line=N, column=M              - Where to insert offset calculation (inside dispatcher loop, before opcode read)'
-    );
-    lines.push(
-      '  @breakpoint line=N, column=M              - Breakpoint location (after opcode read)'
+      '  @breakpoint line=N, column=M              - Where to insert bytecode change check and debugger (before opcode read)'
     );
     lines.push('  @global_bytecode var=Z, line=N, column=M  - Global bytecode variable');
     lines.push('  @reg ip=a, bc=o, ...                      - Register mappings (ip and bc required)');
