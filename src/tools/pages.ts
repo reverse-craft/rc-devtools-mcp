@@ -101,29 +101,26 @@ export const newPage = defineTool({
     });
 
     // Use SmartNavigator for debugger-aware navigation
+    // SmartNavigator already handles all waiting logic including debugger pauses
     const navigator = new SmartNavigator(page);
-    let result: Awaited<ReturnType<typeof navigator.navigateToUrl>>;
-    
-    await context.waitForEventsAfterAction(async () => {
-      result = await navigator.navigateToUrl(request.params.url, {
-        timeout: request.params.timeout,
-        debuggerEnabled: request.params.enableDebugger !== false,
-      });
+    const result = await navigator.navigateToUrl(request.params.url, {
+      timeout: request.params.timeout,
+      debuggerEnabled: request.params.enableDebugger !== false,
     });
 
     // Format response based on navigation result
-    switch (result!.status) {
+    switch (result.status) {
       case 'loaded':
         response.appendResponseLine(
-          `Successfully created new page and navigated to ${result!.url ?? request.params.url}.`,
+          `Successfully created new page and navigated to ${result.url ?? request.params.url}.`,
         );
         break;
       case 'paused':
         response.appendResponseLine(
           `Created new page and navigated to ${request.params.url}. Debugger is paused.`,
         );
-        if (result!.callFrames && result!.callFrames.length > 0) {
-          const topFrame = result!.callFrames[0];
+        if (result.callFrames && result.callFrames.length > 0) {
+          const topFrame = result.callFrames[0];
           response.appendResponseLine(
             `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
           );
@@ -131,12 +128,12 @@ export const newPage = defineTool({
         break;
       case 'timeout':
         response.appendResponseLine(
-          `Created new page but navigation to ${request.params.url} timed out: ${result!.error}`,
+          `Created new page but navigation to ${request.params.url} timed out: ${result.error}`,
         );
         break;
       case 'error':
         response.appendResponseLine(
-          `Created new page but unable to navigate to ${request.params.url}: ${result!.error}`,
+          `Created new page but unable to navigate to ${request.params.url}: ${result.error}`,
         );
         break;
     }
@@ -196,164 +193,166 @@ export const navigatePage = defineTool({
     // Create SmartNavigator for debugger-aware navigation
     const navigator = new SmartNavigator(page);
 
-    await context.waitForEventsAfterAction(async () => {
-      switch (request.params.type) {
-        case 'url': {
-          if (!request.params.url) {
-            throw new Error('A URL is required for navigation of type=url.');
-          }
-          // Use SmartNavigator for debugger-aware URL navigation
-          const result = await navigator.navigateToUrl(request.params.url, {
-            timeout: request.params.timeout,
-            debuggerEnabled: request.params.enableDebugger !== false,
-          });
-
-          // Format response based on navigation result
-          switch (result.status) {
-            case 'loaded':
-              response.appendResponseLine(
-                `Successfully navigated to ${result.url ?? request.params.url}.`,
-              );
-              break;
-            case 'paused':
-              response.appendResponseLine(
-                `Navigated to ${request.params.url}. Debugger is paused.`,
-              );
-              if (result.callFrames && result.callFrames.length > 0) {
-                const topFrame = result.callFrames[0];
-                response.appendResponseLine(
-                  `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
-                );
-              }
-              break;
-            case 'timeout':
-              response.appendResponseLine(
-                `Navigation to ${request.params.url} timed out: ${result.error}`,
-              );
-              break;
-            case 'error':
-              response.appendResponseLine(
-                `Unable to navigate to ${request.params.url}: ${result.error}.`,
-              );
-              break;
-          }
-          break;
+    switch (request.params.type) {
+      case 'url': {
+        if (!request.params.url) {
+          throw new Error('A URL is required for navigation of type=url.');
         }
-        case 'back': {
-          // Use SmartNavigator for debugger-aware back navigation
-          const result = await navigator.navigateBack({
-            timeout: request.params.timeout,
-            debuggerEnabled: request.params.enableDebugger !== false,
-          });
+        // Use SmartNavigator for debugger-aware URL navigation
+        // SmartNavigator already handles all waiting logic including debugger pauses
+        const result = await navigator.navigateToUrl(request.params.url, {
+          timeout: request.params.timeout,
+          debuggerEnabled: request.params.enableDebugger !== false,
+        });
 
-          // Format response based on navigation result
-          switch (result.status) {
-            case 'loaded':
+        // Format response based on navigation result
+        switch (result.status) {
+          case 'loaded':
+            response.appendResponseLine(
+              `Successfully navigated to ${result.url ?? request.params.url}.`,
+            );
+            break;
+          case 'paused':
+            response.appendResponseLine(
+              `Navigated to ${request.params.url}. Debugger is paused.`,
+            );
+            if (result.callFrames && result.callFrames.length > 0) {
+              const topFrame = result.callFrames[0];
               response.appendResponseLine(
-                `Successfully navigated back to ${result.url ?? page.url()}.`,
+                `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
               );
-              break;
-            case 'paused':
-              response.appendResponseLine(
-                `Navigated back. Debugger is paused.`,
-              );
-              if (result.callFrames && result.callFrames.length > 0) {
-                const topFrame = result.callFrames[0];
-                response.appendResponseLine(
-                  `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
-                );
-              }
-              break;
-            case 'timeout':
-              response.appendResponseLine(
-                `Navigate back timed out: ${result.error}`,
-              );
-              break;
-            case 'error':
-              response.appendResponseLine(
-                `Unable to navigate back in the selected page: ${result.error}.`,
-              );
-              break;
-          }
-          break;
+            }
+            break;
+          case 'timeout':
+            response.appendResponseLine(
+              `Navigation to ${request.params.url} timed out: ${result.error}`,
+            );
+            break;
+          case 'error':
+            response.appendResponseLine(
+              `Unable to navigate to ${request.params.url}: ${result.error}.`,
+            );
+            break;
         }
-        case 'forward': {
-          // Use SmartNavigator for debugger-aware forward navigation
-          const result = await navigator.navigateForward({
-            timeout: request.params.timeout,
-            debuggerEnabled: request.params.enableDebugger !== false,
-          });
-
-          // Format response based on navigation result
-          switch (result.status) {
-            case 'loaded':
-              response.appendResponseLine(
-                `Successfully navigated forward to ${result.url ?? page.url()}.`,
-              );
-              break;
-            case 'paused':
-              response.appendResponseLine(
-                `Navigated forward. Debugger is paused.`,
-              );
-              if (result.callFrames && result.callFrames.length > 0) {
-                const topFrame = result.callFrames[0];
-                response.appendResponseLine(
-                  `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
-                );
-              }
-              break;
-            case 'timeout':
-              response.appendResponseLine(
-                `Navigate forward timed out: ${result.error}`,
-              );
-              break;
-            case 'error':
-              response.appendResponseLine(
-                `Unable to navigate forward in the selected page: ${result.error}.`,
-              );
-              break;
-          }
-          break;
-        }
-        case 'reload': {
-          // Use SmartNavigator for debugger-aware reload
-          const result = await navigator.reload({
-            timeout: request.params.timeout,
-            ignoreCache: request.params.ignoreCache,
-            debuggerEnabled: request.params.enableDebugger !== false,
-          });
-
-          // Format response based on navigation result
-          switch (result.status) {
-            case 'loaded':
-              response.appendResponseLine(`Successfully reloaded the page.`);
-              break;
-            case 'paused':
-              response.appendResponseLine(
-                `Reloaded the page. Debugger is paused.`,
-              );
-              if (result.callFrames && result.callFrames.length > 0) {
-                const topFrame = result.callFrames[0];
-                response.appendResponseLine(
-                  `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
-                );
-              }
-              break;
-            case 'timeout':
-              response.appendResponseLine(
-                `Reload timed out: ${result.error}`,
-              );
-              break;
-            case 'error':
-              response.appendResponseLine(
-                `Unable to reload the selected page: ${result.error}.`,
-              );
-              break;
-          }
-          break;
-        }
+        break;
       }
-    });
+      case 'back': {
+        // Use SmartNavigator for debugger-aware back navigation
+        // SmartNavigator already handles all waiting logic including debugger pauses
+        const result = await navigator.navigateBack({
+          timeout: request.params.timeout,
+          debuggerEnabled: request.params.enableDebugger !== false,
+        });
+
+        // Format response based on navigation result
+        switch (result.status) {
+          case 'loaded':
+            response.appendResponseLine(
+              `Successfully navigated back to ${result.url ?? page.url()}.`,
+            );
+            break;
+          case 'paused':
+            response.appendResponseLine(
+              `Navigated back. Debugger is paused.`,
+            );
+            if (result.callFrames && result.callFrames.length > 0) {
+              const topFrame = result.callFrames[0];
+              response.appendResponseLine(
+                `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
+              );
+            }
+            break;
+          case 'timeout':
+            response.appendResponseLine(
+              `Navigate back timed out: ${result.error}`,
+            );
+            break;
+          case 'error':
+            response.appendResponseLine(
+              `Unable to navigate back in the selected page: ${result.error}.`,
+            );
+            break;
+        }
+        break;
+      }
+      case 'forward': {
+        // Use SmartNavigator for debugger-aware forward navigation
+        // SmartNavigator already handles all waiting logic including debugger pauses
+        const result = await navigator.navigateForward({
+          timeout: request.params.timeout,
+          debuggerEnabled: request.params.enableDebugger !== false,
+        });
+
+        // Format response based on navigation result
+        switch (result.status) {
+          case 'loaded':
+            response.appendResponseLine(
+              `Successfully navigated forward to ${result.url ?? page.url()}.`,
+            );
+            break;
+          case 'paused':
+            response.appendResponseLine(
+              `Navigated forward. Debugger is paused.`,
+            );
+            if (result.callFrames && result.callFrames.length > 0) {
+              const topFrame = result.callFrames[0];
+              response.appendResponseLine(
+                `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
+              );
+            }
+            break;
+          case 'timeout':
+            response.appendResponseLine(
+              `Navigate forward timed out: ${result.error}`,
+            );
+            break;
+          case 'error':
+            response.appendResponseLine(
+              `Unable to navigate forward in the selected page: ${result.error}.`,
+            );
+            break;
+        }
+        break;
+      }
+      case 'reload': {
+        // Use SmartNavigator for debugger-aware reload
+        // SmartNavigator already handles all waiting logic including debugger pauses
+        const result = await navigator.reload({
+          timeout: request.params.timeout,
+          ignoreCache: request.params.ignoreCache,
+          debuggerEnabled: request.params.enableDebugger !== false,
+        });
+
+        // Format response based on navigation result
+        switch (result.status) {
+          case 'loaded':
+            response.appendResponseLine(`Successfully reloaded the page.`);
+            break;
+          case 'paused':
+            response.appendResponseLine(
+              `Reloaded the page. Debugger is paused.`,
+            );
+            if (result.callFrames && result.callFrames.length > 0) {
+              const topFrame = result.callFrames[0];
+              response.appendResponseLine(
+                `Paused at: ${topFrame.functionName || '(anonymous)'} (${topFrame.url}:${topFrame.location.lineNumber + 1})`,
+              );
+            }
+            break;
+          case 'timeout':
+            response.appendResponseLine(
+              `Reload timed out: ${result.error}`,
+            );
+            break;
+          case 'error':
+            response.appendResponseLine(
+              `Unable to reload the selected page: ${result.error}.`,
+            );
+            break;
+        }
+        break;
+      }
+    }
 
     response.setIncludePages(true);
   },
