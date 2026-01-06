@@ -4,10 +4,9 @@ A powerful MCP (Model Context Protocol) server for browser debugging and reverse
 
 ## Features
 
-- **JavaScript Debugging**: Set breakpoints, step through code, inspect variables, and analyze call graphs
-- **IR Debugging**: Debug JSVMP-protected code at the IR (Intermediate Representation) level with source map support
+- **JavaScript Debugging**: Set breakpoints, step through code, inspect variables, and evaluate expressions
+- **IR Debugging**: Debug JSVMP-protected code at the IR (Intermediate Representation) level with vmasm support
 - **Network Analysis**: Monitor, search, and save network requests with full request/response details
-- **Script Interception**: Replace JavaScript code on-the-fly for testing and reverse engineering
 - **Page Automation**: Navigate pages, interact with elements, and capture screenshots
 - **Console Monitoring**: Access and filter console messages with full stack traces
 
@@ -139,9 +138,6 @@ List all network requests and show me the API calls
 - `enableDebugger` (boolean, optional): Enable JavaScript debugger (default: true)
 - `timeout` (number, optional): Navigation timeout in milliseconds
 
-**`close_page`** - Close a page by index
-- `pageIdx` (number, required): Index of page to close (from `list_pages`)
-
 **`list_pages`** - List all open pages
 - No parameters
 
@@ -149,12 +145,10 @@ List all network requests and show me the API calls
 - `pageIdx` (number, required): Index of page to select (from `list_pages`)
 - `bringToFront` (boolean, optional): Focus and bring page to top
 
-**`clear_cookies`** - Clear browser cookies
-- `url` (string, optional): Clear cookies for specific domain only (omit to clear all)
-
 ### Network
 
 **`list_network_requests`** - List all network requests
+- `keyword` (string, optional): Filter requests by keyword in URL, headers, or body
 - `pageSize` (number, optional): Maximum requests to return
 - `pageIdx` (number, optional): Page number (0-based)
 - `resourceTypes` (array, optional): Filter by resource types (e.g., `["xhr", "fetch", "script"]`)
@@ -276,38 +270,46 @@ List all network requests and show me the API calls
 **`list_xhr_breakpoints`** - List all active XHR breakpoints
 - No parameters
 
-### Script Analysis
+### Screenshots & Snapshots
 
-**`save_script_source`** - Save script source code to file
-- `scriptId` (string, optional): Script ID (omit to use currently selected script in DevTools)
-- `filePath` (string, required): File path to save the source code
+**`take_screenshot`** - Capture a screenshot
+- `format` (string, optional): Image format: `png`, `jpeg`, or `webp` (default: `png`)
+- `quality` (number, optional): Compression quality for JPEG/WebP (0-100, higher = better quality)
+- `uid` (string, optional): Element uid to screenshot (omit for full page)
+- `fullPage` (boolean, optional): Capture full page instead of viewport (incompatible with uid)
+- `filePath` (string, optional): Save to file instead of attaching to response
 
-**`analyze_call_graph`** - Analyze function callers and callees
-- `functionName` (string, required): Name of the function to analyze
-- `upstreamDepth` (number, optional): Max depth for upstream trace (callers, default: 3, max: 10)
-- `downstreamDepth` (number, optional): Max depth for downstream trace (callees, default: 3, max: 10)
-- `urlPattern` (string, optional): Regex pattern to filter scripts by URL
+**`take_snapshot`** - Take a text snapshot of the page
+- `verbose` (boolean, optional): Include all information from the full a11y tree (default: false)
+- `filePath` (string, optional): Save to file instead of attaching to response
+- `search` (string, optional): Filter elements matching this text (case-insensitive)
+- `pageSize` (number, optional): Number of elements per page for pagination
+- `pageIdx` (number, optional): Page index (0-based) for pagination
 
-**`search_functions`** - Search for functions by name pattern
-- `pattern` (string, required): Function name pattern (substring or regex)
-- `urlPattern` (string, optional): Regex pattern to filter scripts by URL
-- `maxResults` (number, optional): Maximum results to return (default: 50)
+### IR Debugging (VMASM)
 
-### Script Interception
+**`load_vmasm`** - Load a vmasm file and configure script interception
+- `filePath` (string, required): Path to the vmasm file (absolute or relative)
+- `sourceFilePath` (string, optional): Path to the original JS source file (if not in vmasm @source directive)
+- **Note:** Refresh the page after loading for the debug script to take effect
 
-**`replace_script`** - Replace code in scripts matching a URL pattern
-- `urlPattern` (string, required): Regex to match script URLs (e.g., `".*main\\.js.*"`)
-- `oldCode` (string, required): Original code snippet to replace (must match exactly)
-- `newCode` (string, required): New code snippet
-- **Note:** Changes take effect after page refresh. Rules persist across refreshes.
+**`get_vm_state`** - Get the current virtual machine state when paused
+- `maxStackItems` (number, optional): Maximum stack items to display (default: 20)
+- `maxConstants` (number, optional): Maximum constants to display (default: 10)
+- `contextLines` (number, optional): Number of bytecode instructions to show before/after current (default: 5)
+- Returns: JSVMP registers, transform variables, opcode listing, virtual call stack, and scope chain
 
-**`list_script_replacements`** - List active script replacement rules
+**`set_vmasm_breakpoint`** - Set a breakpoint at a vmasm bytecode address
+- `address` (number or string, required): Bytecode address - supports hex string (e.g., "0x0000", "0x100") or decimal (e.g., 0, 256)
+- **Note:** Requires a vmasm file to be loaded first
+
+**`list_vmasm_breakpoints`** - List all active vmasm breakpoints
 - No parameters
 
-**`remove_script_replacement`** - Remove a script replacement rule
-- `ruleId` (string, required): Rule ID to remove (from `list_script_replacements`)
+**`remove_vmasm_breakpoint`** - Remove a vmasm breakpoint by its ID
+- `breakpointId` (string, required): The breakpoint ID to remove (e.g., "vmasm-bp-1")
 
-**`clear_script_replacements`** - Remove all script replacement rules
+**`clear_vmasm_breakpoints`** - Remove all vmasm breakpoints
 - No parameters
 
 ### Console
@@ -324,18 +326,11 @@ List all network requests and show me the API calls
 **`get_console_message`** - Get a specific console message by ID
 - `msgid` (number, required): Message ID from `list_console_messages`
 
-### Screenshots & Snapshots
+### Script Evaluation
 
-**`take_screenshot`** - Capture a screenshot
-- `format` (string, optional): Image format: `png`, `jpeg`, or `webp` (default: `png`)
-- `quality` (number, optional): Compression quality for JPEG/WebP (0-100, higher = better quality)
-- `uid` (string, optional): Element uid to screenshot (omit for full page)
-- `fullPage` (boolean, optional): Capture full page instead of viewport (incompatible with uid)
-- `filePath` (string, optional): Save to file instead of attaching to response
-
-**`take_snapshot`** - Take a text snapshot of the page
-- No parameters
-- Returns accessibility tree representation of the page
+**`evaluate_script`** - Evaluate JavaScript code in the page context
+- `script` (string, required): JavaScript code to execute
+- `maxOutputChars` (number, optional): Maximum characters in the output (default: 10000)
 
 ## Configuration Options
 
