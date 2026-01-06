@@ -398,7 +398,8 @@ class VmasmVisitor extends BaseCstVisitor {
 
     // Parse: @opcode_transform 68 ADD: a = v[p - 1]; b = v[p]; result = a + b
     // Also supports -1 as a fallback/default opcode: @opcode_transform -1 DEFAULT: ...
-    const match = lineText.match(/@opcode_transform\s+(-?\d+)\s+([A-Z_]+):\s*(.+)/);
+    // Note: opcode names can contain digits, e.g., PUSH_UNDEF2
+    const match = lineText.match(/@opcode_transform\s+(-?\d+)\s+([A-Z0-9_]+):\s*(.+)/);
     if (!match) return null;
 
     const opcodeNumber = parseInt(match[1], 10); // Supports negative numbers like -1

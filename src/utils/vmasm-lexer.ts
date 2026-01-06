@@ -132,9 +132,10 @@ export const OpcodeTransformDirective = createToken({
 // 或: @opcode_transform -1 {NAME}: {expressions} (-1 作为默认/fallback)
 // 表达式部分包含 <=, >=, ===, !==, &, |, ^, >>>, >>, <<, %, ~, !, typeof, instanceof, in 等
 // 新格式支持引号包裹的表达式: "pre:varName = expression"; "post:result = expression"
+// 注意: opcode 名称可以包含数字，如 PUSH_UNDEF2
 export const OpcodeTransformLine = createToken({
   name: 'OpcodeTransformLine',
-  pattern: /@opcode_transform\s+(?:-?\d+\s+)?[A-Z_]+:[^\n]*/,
+  pattern: /@opcode_transform\s+(?:-?\d+\s+)?[A-Z0-9_]+:[^\n]*/,
   line_breaks: false,
 });
 
