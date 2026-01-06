@@ -567,9 +567,8 @@ export class DebugFileGenerator {
           // Insert code before the position
           lines[lineIndex] = line.slice(0, column) + insertion.code + line.slice(column);
         } else {
-          // Insert code after the position (find end of statement)
-          // For simplicity, insert at the end of the line with a semicolon
-          lines[lineIndex] = line + insertion.code;
+          // Insert code after the position (at the specified column)
+          lines[lineIndex] = line.slice(0, column) + insertion.code + line.slice(column);
         }
       }
 
