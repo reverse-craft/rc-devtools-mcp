@@ -94,6 +94,12 @@ export interface InjectionConfig {
     column: number;
   };
 
+  /** Location from @dispatcher - where to insert breakpoint check (before dispatcher) */
+  dispatcherLocation: {
+    line: number;
+    column: number;
+  };
+
   /** Register names from @reg directive */
   registers: {
     ip: string; // Instruction pointer register (e.g., 'a')
@@ -397,7 +403,7 @@ export class DebugFileGenerator {
 
   /**
    * Build InjectionConfig from vmasm metadata
-   * Extracts @loop_entry, @breakpoint, @global_bytecode, @reg information
+   * Extracts @loop_entry, @breakpoint, @dispatcher, @global_bytecode, @reg information
    * Returns null with detailed error logging if required directives are missing
    */
   buildInjectionConfig(
@@ -410,6 +416,11 @@ export class DebugFileGenerator {
     // Check @loop_entry
     if (!metadata.loopEntry) {
       missingDirectives.push('@loop_entry');
+    }
+
+    // Check @dispatcher location
+    if (!metadata.dispatcher?.location) {
+      missingDirectives.push('@dispatcher');
     }
 
     // Check @breakpoint (inside dispatcher)
@@ -452,6 +463,10 @@ export class DebugFileGenerator {
       breakpointLocation: {
         line: metadata.dispatcher!.breakpoint!.line,
         column: metadata.dispatcher!.breakpoint!.column,
+      },
+      dispatcherLocation: {
+        line: metadata.dispatcher!.location.line,
+        column: metadata.dispatcher!.location.column,
       },
       registers: {
         ip: metadata.registers.ip,
@@ -555,11 +570,11 @@ export class DebugFileGenerator {
         type: 'before',
       });
 
-      // Step 7: Breakpoint check (insert before breakpoint location)
+      // Step 7: Breakpoint check (insert before dispatcher location)
       const breakpointCheckCode = this.createBreakpointCheck(config.registers.ip);
       insertions.push({
-        line: config.breakpointLocation.line,
-        column: config.breakpointLocation.column,
+        line: config.dispatcherLocation.line,
+        column: config.dispatcherLocation.column,
         code: breakpointCheckCode,
         type: 'before',
       });
@@ -701,7 +716,7 @@ export class DebugFileGenerator {
    * Generate breakpoint check code
    */
   private createBreakpointCheck(ipRegister: string): string {
-    return `if(window.__breakpoints&&(window.__breakpoints.has(${ipRegister}+__jsvmp_offset)||window.__breakpoints.has(${ipRegister}-1+__jsvmp_offset)))debugger;`;
+    return `if(window.__breakpoints&&window.__breakpoints.has(${ipRegister}+__jsvmp_offset))debugger;`;
   }
 
 
@@ -804,10 +819,13 @@ export class DebugFileGenerator {
     lines.push('');
     lines.push('Required directives for breakpoint injection:');
     lines.push(
+      '  @dispatcher line=N, column=M              - Where to insert breakpoint check (before dispatcher)'
+    );
+    lines.push(
       '  @loop_entry line=N, column=M              - Where to insert offset calculation (inside dispatcher loop, before opcode read)'
     );
     lines.push(
-      '  @breakpoint line=N, column=M              - Where to insert breakpoint check (after opcode read)'
+      '  @breakpoint line=N, column=M              - Breakpoint location (after opcode read)'
     );
     lines.push('  @global_bytecode var=Z, line=N, column=M  - Global bytecode variable');
     lines.push('  @reg ip=a, bc=o, ...                      - Register mappings (ip and bc required)');
