@@ -12,6 +12,9 @@
 import './polyfill.js';
 
 import process from 'node:process';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
 
 import type {Channel} from './core/browser.js';
 import {ensureBrowserConnected, ensureBrowserLaunched} from './core/browser.js';
@@ -37,7 +40,9 @@ import {ToolCategory} from './tools/categories.js';
 import type {ToolDefinition} from './tools/tool-definition.js';
 import {tools} from './tools/index.js';
 
-const VERSION = '0.1.0';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+const VERSION = packageJson.version;
 
 export const args = parseArguments(VERSION);
 
