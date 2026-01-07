@@ -8,7 +8,7 @@ import {logger} from './logger.js';
 import type {CDPSession, Page} from '../third-party/index.js';
 import {clearParseResultCache} from '../tools/analysis.js';
 
-import {getCdpSession} from './cdp.js';
+import {getCdpSession, enableDebuggerPausedTracking} from './cdp.js';
 import {cacheScript, clearScriptCache} from './smart-breakpoint-utils.js';
 
 // Store active breakpoints per page
@@ -247,6 +247,9 @@ export async function initializeDebuggerForPage(
   if (!state.enabled) {
     await session.send('Debugger.enable');
     state.enabled = true;
+    
+    // Enable debugger paused state tracking
+    enableDebuggerPausedTracking(page, session);
 
     // Listen for script parsed events to populate the script cache
     session.on('Debugger.scriptParsed', async (params: any) => {

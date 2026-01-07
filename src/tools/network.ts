@@ -191,6 +191,10 @@ export const listNetworkRequests = defineTool({
       const searchResults: SearchResult[] = [];
       const searchTerm = keyword.trim();
 
+      // Process requests with timeout protection
+      const RESPONSE_BODY_TIMEOUT = 5000; // 5 seconds timeout per response body
+      const MAX_RESPONSE_BODY_SIZE = 10 * 1024 * 1024; // 10MB limit
+
       for (const httpRequest of requests) {
         const matches: SearchMatch[] = [];
         const reqid = context.getNetworkRequestStableId(httpRequest);
@@ -235,20 +239,49 @@ export const listNetworkRequests = defineTool({
             }
           }
 
-          // Search in response body
+          // Search in response body with timeout and size limit
           try {
             const respContentType = httpResponse.headers()['content-type'] ?? '';
-            if (isProbablyTextContentType(respContentType)) {
-              const respBody = await httpResponse.text();
-              if (respBody && respBody.toLowerCase().includes(searchTerm.toLowerCase())) {
+            const contentLength = httpResponse.headers()['content-length'];
+            const bodySize = contentLength ? parseInt(contentLength, 10) : 0;
+
+            // Skip if body is too large
+            if (bodySize > 0 && bodySize > MAX_RESPONSE_BODY_SIZE) {
+              matches.push({
+                location: 'response-body',
+                snippet: `<skipped: response body too large (${(bodySize / 1024 / 1024).toFixed(2)}MB)>`
+              });
+            } else if (isProbablyTextContentType(respContentType)) {
+              // Add timeout protection
+              const textPromise = httpResponse.text();
+              const timeoutPromise = new Promise<string>((_, reject) => {
+                setTimeout(() => reject(new Error('timeout')), RESPONSE_BODY_TIMEOUT);
+              });
+
+              const respBody = await Promise.race([textPromise, timeoutPromise]);
+              
+              // Check size after fetching
+              if (respBody.length > MAX_RESPONSE_BODY_SIZE) {
+                matches.push({
+                  location: 'response-body',
+                  snippet: `<skipped: response body too large (${(respBody.length / 1024 / 1024).toFixed(2)}MB)>`
+                });
+              } else if (respBody && respBody.toLowerCase().includes(searchTerm.toLowerCase())) {
                 const snippets = findAllMatches(respBody, searchTerm, config.maxSnippetLength, 3);
                 for (const snippet of snippets) {
                   matches.push({location: 'response-body', snippet});
                 }
               }
             }
-          } catch {
-            // Ignore response body errors
+          } catch (error) {
+            // Log timeout or other errors
+            if (error instanceof Error && error.message === 'timeout') {
+              matches.push({
+                location: 'response-body',
+                snippet: '<skipped: response body fetch timeout>'
+              });
+            }
+            // Ignore other response body errors
           }
         }
 
@@ -302,7 +335,9 @@ export const listNetworkRequests = defineTool({
 
     // Original behavior when keyword is not provided
     const data = await context.getDevToolsData();
-    response.attachDevToolsData(data);
+    if (data && (data.cdpRequestId || data.cdpBackendNodeId)) {
+      response.attachDevToolsData(data);
+    }
     const reqid = data?.cdpRequestId
       ? context.resolveCdpRequestId(data.cdpRequestId)
       : undefined;
@@ -337,7 +372,9 @@ export const getNetworkRequest = defineTool({
       response.attachNetworkRequest(request.params.reqid);
     } else {
       const data = await context.getDevToolsData();
-      response.attachDevToolsData(data);
+      if (data && (data.cdpRequestId || data.cdpBackendNodeId)) {
+        response.attachDevToolsData(data);
+      }
       const reqid = data?.cdpRequestId
         ? context.resolveCdpRequestId(data.cdpRequestId)
         : undefined;
@@ -454,7 +491,9 @@ export const saveNetworkRequest = defineTool({
     let reqid = request.params.reqid;
     if (!reqid) {
       const data = await context.getDevToolsData();
-      response.attachDevToolsData(data);
+      if (data && (data.cdpRequestId || data.cdpBackendNodeId)) {
+        response.attachDevToolsData(data);
+      }
       reqid = data?.cdpRequestId ? context.resolveCdpRequestId(data.cdpRequestId) : undefined;
     }
 

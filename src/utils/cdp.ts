@@ -16,6 +16,11 @@ import {clearScriptCache} from './smart-breakpoint-utils.js';
 const cdpSessions = new WeakMap<Page, CDPSession>();
 
 /**
+ * Track debugger paused state per page.
+ */
+const debuggerPausedState = new WeakMap<Page, boolean>();
+
+/**
  * Get or create a CDP session for a page.
  */
 export async function getCdpSession(page: Page): Promise<CDPSession> {
@@ -25,6 +30,29 @@ export async function getCdpSession(page: Page): Promise<CDPSession> {
     cdpSessions.set(page, session);
   }
   return session;
+}
+
+/**
+ * Enable debugger paused state tracking for a page.
+ * Should be called when Debugger domain is enabled.
+ */
+export function enableDebuggerPausedTracking(page: Page, session: CDPSession): void {
+  // Listen for debugger paused/resumed events
+  session.on('Debugger.paused', () => {
+    debuggerPausedState.set(page, true);
+  });
+  
+  session.on('Debugger.resumed', () => {
+    debuggerPausedState.set(page, false);
+  });
+}
+
+/**
+ * Check if the debugger is currently paused for a page.
+ * Returns true if paused, false otherwise.
+ */
+export function isDebuggerPaused(page: Page): boolean {
+  return debuggerPausedState.get(page) ?? false;
 }
 
 /**
@@ -42,6 +70,7 @@ export async function disposeCdpSession(page: Page): Promise<void> {
       // Ignore detach errors
     });
     cdpSessions.delete(page);
+    debuggerPausedState.delete(page);
   }
 }
 

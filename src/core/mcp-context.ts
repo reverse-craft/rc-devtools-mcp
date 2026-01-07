@@ -36,7 +36,7 @@ import {takeSnapshot} from '../tools/snapshot.js';
 import {maybeInitializeVmasmForPage} from '../tools/vmasm.js';
 import {CLOSE_PAGE_ERROR} from '../tools/tool-definition.js';
 import type {Context, DevToolsData} from '../tools/tool-definition.js';
-import {disposeCdpSession, getNetworkInitiator, type NetworkInitiator} from '../utils/cdp.js';
+import {disposeCdpSession, getNetworkInitiator, isDebuggerPaused, hasCdpSession, type NetworkInitiator} from '../utils/cdp.js';
 import {initializeDebuggerForPage} from '../utils/debugger-utils.js';
 import {WaitForHelper} from '../utils/wait-for-helper.js';
 
@@ -576,12 +576,23 @@ export class McpContext implements Context {
     try {
       this.logger('Getting DevTools UI data');
       const selectedPage = this.getSelectedPage();
+      
+      // Check if debugger is paused - if so, skip to avoid hanging
+      // Only check if CDP session exists (debugger might be enabled)
+      if (hasCdpSession(selectedPage) && isDebuggerPaused(selectedPage)) {
+        this.logger('Debugger is paused, skipping DevTools data retrieval');
+        return {};
+      }
+      
       const devtoolsPage = this.getDevToolsPage(selectedPage);
       if (!devtoolsPage) {
         this.logger('No DevTools page detected');
         return {};
       }
-      const {cdpRequestId, cdpBackendNodeId} = await devtoolsPage.evaluate(
+      
+      // Add timeout protection
+      const DEVTOOLS_EVAL_TIMEOUT = 3000;
+      const evalPromise = devtoolsPage.evaluate(
         async () => {
           // @ts-expect-error no types
           const UI = await import('/bundled/ui/legacy/legacy.js');
@@ -599,6 +610,12 @@ export class McpContext implements Context {
           };
         },
       );
+      
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('DevTools evaluation timeout')), DEVTOOLS_EVAL_TIMEOUT);
+      });
+      
+      const {cdpRequestId, cdpBackendNodeId} = await Promise.race([evalPromise, timeoutPromise]);
       return {cdpBackendNodeId, cdpRequestId};
     } catch (err) {
       this.logger('error getting devtools data', err);
