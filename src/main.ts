@@ -75,6 +75,9 @@ let nativeChromeInstance: NativeChromeInstance | null = null;
  */
 async function launchAndConnectNativeChrome(): Promise<ReturnType<typeof ensureBrowserConnected>> {
   const extraArgs: string[] = (args.chromeArg ?? []).map(String);
+  if (args.disableMedia) {
+    extraArgs.push('--blink-settings=imagesEnabled=false');
+  }
   const devtools = args.experimentalDevtools ?? false;
   const cdpPort = 9222;
 
@@ -117,6 +120,9 @@ async function getContext(): Promise<McpContext> {
   const extraArgs: string[] = (args.chromeArg ?? []).map(String);
   if (args.proxyServer) {
     extraArgs.push(`--proxy-server=${args.proxyServer}`);
+  }
+  if (args.disableMedia) {
+    extraArgs.push('--blink-settings=imagesEnabled=false');
   }
   const devtools = args.experimentalDevtools ?? false;
   const useNativeLaunch = args.nativeLaunch !== false;

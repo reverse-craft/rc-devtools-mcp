@@ -218,6 +218,11 @@ export const cliOptions = {
     default: true,
     describe: 'Set to false to exclude tools related to network.',
   },
+  disableMedia: {
+    type: 'boolean',
+    default: false,
+    describe: 'Disable loading of images and other media resources to improve performance and reduce bandwidth usage.',
+  },
 } satisfies Record<string, YargsOptions>;
 
 export function parseArguments(version: string, argv = process.argv) {
@@ -291,6 +296,10 @@ export function parseArguments(version: string, argv = process.argv) {
       [
         '$0 --proxy-server=http://proxy.example.com:8080 --proxy-username=user --proxy-password=pass',
         'Use an HTTP proxy server with authentication',
+      ],
+      [
+        '$0 --disable-media',
+        'Disable loading of images and media resources',
       ],
     ]);
 
