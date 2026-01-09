@@ -1,6 +1,6 @@
 {
   "name": "@reverse-craft/rc-devtools-mcp",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "ReverseCraft DevTools MCP - MCP server for browser debugging and reverse engineering",
   "type": "module",
   "bin": "./build/src/index.js",
