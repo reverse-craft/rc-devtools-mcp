@@ -185,9 +185,6 @@ export class SmartNavigator {
     url: string,
     options?: SmartNavigationOptions,
   ): Promise<SmartNavigationResult> {
-    // Ensure page target is fully attached before navigation
-    await this.page.target().page();
-
     const session = await this.getSession();
     const debuggerState = getDebuggerState(this.page);
 

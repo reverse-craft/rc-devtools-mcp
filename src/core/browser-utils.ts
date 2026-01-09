@@ -915,6 +915,22 @@ export async function isNativeChromeRunning(port = 9222): Promise<boolean> {
 }
 
 /**
+ * Find an available port starting from the given port.
+ * @param startPort - Port to start searching from (default: 9222)
+ * @returns Available port number
+ */
+export async function findAvailablePort(startPort = 9222): Promise<number> {
+  const maxAttempts = 100;
+  for (let port = startPort; port < startPort + maxAttempts; port++) {
+    const isRunning = await isNativeChromeRunning(port);
+    if (!isRunning) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found in range ${startPort}-${startPort + maxAttempts}`);
+}
+
+/**
  * Kill any running native Chrome instance.
  */
 export function killNativeChrome(): void {

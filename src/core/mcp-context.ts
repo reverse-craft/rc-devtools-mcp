@@ -318,9 +318,6 @@ export class McpContext implements Context {
       newBrowser.on('targetcreated', this.#onTargetCreated);
       const pages = await newBrowser.pages();
       page = pages[0] || (await newBrowser.newPage());
-
-      // Wait for page to be fully ready when browser just launched
-      await page.target().page();
     } else if (options?.incognito || options?.newWindow) {
       const browserContext = await this.browser.createBrowserContext();
       page = await browserContext.newPage();

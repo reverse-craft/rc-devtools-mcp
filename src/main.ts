@@ -22,6 +22,7 @@ import {
   launchNativeChrome,
   isNativeChromeRunning,
   killNativeChrome,
+  findAvailablePort,
   type NativeChromeInstance,
 } from './core/browser-utils.js';
 import {parseArguments} from './cli.js';
@@ -79,12 +80,16 @@ async function launchAndConnectNativeChrome(): Promise<ReturnType<typeof ensureB
     extraArgs.push('--blink-settings=imagesEnabled=false');
   }
   const devtools = args.experimentalDevtools ?? false;
-  const cdpPort = 9222;
+  let cdpPort = 9222;
 
-  // Check if Chrome is already running on the port
+  // Check if Chrome is already running on the default port
   const isRunning = await isNativeChromeRunning(cdpPort);
 
   if (!isRunning) {
+    // Find an available port if default port is occupied
+    cdpPort = await findAvailablePort(cdpPort);
+    logger(`Using CDP port ${cdpPort}`);
+
     logger('Launching native Chrome with CDP (reduced detection mode)...');
     nativeChromeInstance = await launchNativeChrome({
       cdpPort,
