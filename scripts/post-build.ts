@@ -75,6 +75,7 @@ export const experiments = {
   writeFile(runtimeFile, runtimeContent);
 
   copyDevToolsDescriptionFiles();
+  copyBundledDependencies();
 }
 
 function copyDevToolsDescriptionFiles() {
@@ -88,6 +89,24 @@ function copyDevToolsDescriptionFiles() {
     'issue-descriptions',
   );
   fs.cpSync(sourceDir, destDir, {recursive: true});
+}
+
+function copyBundledDependencies() {
+  // Copy @modelcontextprotocol/sdk to build/node_modules
+  const sdkSourceDir = path.join(
+    process.cwd(),
+    'node_modules',
+    '@modelcontextprotocol',
+    'sdk',
+  );
+  const sdkDestDir = path.join(
+    BUILD_DIR,
+    'node_modules',
+    '@modelcontextprotocol',
+    'sdk',
+  );
+  fs.mkdirSync(path.dirname(sdkDestDir), {recursive: true});
+  fs.cpSync(sdkSourceDir, sdkDestDir, {recursive: true});
 }
 
 main();
