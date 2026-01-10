@@ -10,6 +10,7 @@ import {clearParseResultCache} from '../tools/analysis.js';
 
 import {getCdpSession, enableDebuggerPausedTracking} from './cdp.js';
 import {cacheScript, clearScriptCache} from './smart-breakpoint-utils.js';
+import {enableCookieTracking} from './cookie-tracker.js';
 
 // Store active breakpoints per page
 export interface BreakpointInfo {
@@ -298,6 +299,13 @@ export async function initializeDebuggerForPage(
       state.pausedCallFrames = undefined;
       logger('[debugger] Execution resumed');
     });
+  }
+
+  // Enable cookie tracking for the page
+  try {
+    await enableCookieTracking(page);
+  } catch (err) {
+    logger(`[debugger] Error enabling cookie tracking: ${err}`);
   }
 
   // Set up navigation listener once per page to restore breakpoints after page refresh
